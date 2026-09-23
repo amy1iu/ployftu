@@ -1,5 +1,10 @@
+import { AppShell } from "@/components/app-shell";
 import { OnboardingChat } from "@/components/onboarding-chat";
 
 export default function Home() {
-  return <OnboardingChat />;
+  return (
+    <AppShell>
+      <OnboardingChat />
+    </AppShell>
+  );
 }

@@ -21,7 +21,11 @@ npm run dev
 | `src/app/api/chat/route.ts` | Streams the agent via AI Gateway; saves conversations for signed-in users |
 | `src/lib/ai/agent.ts` | Model, system prompt, tools (`recommendProducts`), message types |
 | `src/lib/ai/catalog.ts` | Placeholder product/workflow catalog |
-| `src/components/onboarding-chat.tsx` | Chat UI (`useChat`), renders recommendation cards |
+| `src/components/app-shell.tsx` | Page shell: left rail + main area |
+| `src/components/sidebar/` | Left rail; tabs defined in `nav-config.ts` (mocked, no navigation yet) |
+| `src/components/onboarding-chat.tsx` | Chat screen (`useChat`) with the opening greeting |
+| `src/components/chat/` | Header, message rendering (incl. recommendation cards), composer |
+| `src/lib/mock-data.ts` | Placeholder user/workspace/sites/ploys until auth is wired up |
 | `src/lib/supabase/*` | Browser, server, and proxy Supabase clients |
 | `src/proxy.ts` | Refreshes the Supabase session on each request |
 | `supabase/migrations/` | `onboarding_conversations` table with RLS |

@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Keep the dev badge from covering the sidebar's user avatar.
+  devIndicators: { position: "bottom-right" },
 };
 
 export default nextConfig;
