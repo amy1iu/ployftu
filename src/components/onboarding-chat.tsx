@@ -1,11 +1,12 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { useEffect, useRef, useTransition } from "react";
-import { updateOnboardingStatus } from "@/app/actions";
+import { Fragment, useEffect, useRef, useTransition } from "react";
+import { confirmProfile, updateOnboardingStatus } from "@/app/actions";
 import { ChatHeader, HeaderMenu } from "./chat/chat-header";
-import { Composer } from "./chat/composer";
+import { Composer, type ComposerHandle } from "./chat/composer";
 import { Message } from "./chat/message";
+import { SiteCard } from "./chat/site-card";
 import { ThinkingIndicator } from "./chat/thinking-indicator";
 import { useOnboardingChat, useWorkspace } from "./workspace/workspace-provider";
 
@@ -15,11 +16,23 @@ export function OnboardingChat() {
   const { messages, sendMessage, status, error } = useChat({ chat });
   const busy = status === "submitted" || status === "streaming";
   const bottomRef = useRef<HTMLDivElement>(null);
+  const composer = useRef<ComposerHandle>(null);
   const [, startTransition] = useTransition();
 
+  const { crawl } = workspace;
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, crawl?.status, crawl?.pages.length]);
+
+  // The site card sits right after the message that gave the URL.
+  const siteCard = crawl && (
+    <SiteCard
+      crawl={crawl}
+      onConfirm={() => startTransition(() => confirmProfile(workspace.id))}
+      onFix={() => composer.current?.setDraft("Actually, ")}
+    />
+  );
+  const siteCardAfter = messages.some((m) => m.id === crawl?.afterMessageId) ? crawl?.afterMessageId : null;
 
   const send = (text: string) => sendMessage({ text });
   const lastAssistant = messages.findLast((m) => m.role === "assistant");
@@ -46,12 +59,15 @@ export function OnboardingChat() {
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[702px] space-y-6 px-4 pt-5 pb-6 text-[14px] leading-[21px]">
           {messages.map((message) => (
-            <Message
-              key={message.id}
-              message={message}
-              onReply={!busy && message.id === lastAssistant?.id && lastAssistant === messages.at(-1) ? send : undefined}
-            />
+            <Fragment key={message.id}>
+              <Message
+                message={message}
+                onReply={!busy && message.id === lastAssistant?.id && lastAssistant === messages.at(-1) ? send : undefined}
+              />
+              {message.id === siteCardAfter && siteCard}
+            </Fragment>
           ))}
+          {!siteCardAfter && siteCard}
           {thinking && <ThinkingIndicator />}
           {error && (
             <p className="px-2 text-[13px] text-red-600">
@@ -67,6 +83,7 @@ export function OnboardingChat() {
 
       <div className="mx-auto w-full max-w-[702px] px-4 pb-[26px]">
         <Composer
+          ref={composer}
           disabled={busy}
           onSend={send}
           placeholder={

@@ -2,48 +2,68 @@ import { convertToModelMessages, createUIMessageStream, Output, streamText } fro
 import type { Workspace } from "@/lib/db/types";
 import { getDocs, getWorkspace } from "@/lib/db/workspaces";
 import { applyEntryUpdate } from "@/lib/onboarding/set-entry";
+import { readAndProfileSite } from "@/lib/site/run";
 import { models } from "../models";
 import { extractEntryUpdate } from "./extract";
 import type { OnboardingUIMessage } from "./messages";
+import { recordProfileNotes } from "./profile-notes";
 import { buildSystemPrompt } from "./prompt";
 import { replySchema, writeReply } from "./reply";
 
 export type { OnboardingUIMessage } from "./messages";
 
 /**
- * Records whatever the user's latest message answered (website, goals, business).
- * Failures (e.g. a rate limit) are logged, not thrown: the reply matters more.
+ * Records whatever the user's latest message answered (website, goals, business)
+ * and returns the updated entry. Failures (e.g. a rate limit) are logged, not
+ * thrown: the reply matters more.
  */
 async function recordEntryAnswers(workspace: Workspace, messages: OnboardingUIMessage[]) {
   try {
     const update = await extractEntryUpdate(workspace.entry, messages);
-    if (!update.website && !update.goals && !update.business) return;
+    if (!update.website && !update.goals && !update.business) return workspace.entry;
     const userTurns = messages.filter((m) => m.role === "user").length;
-    await applyEntryUpdate(workspace.id, update, { userTurns });
+    return (await applyEntryUpdate(workspace.id, update, { userTurns })).entry;
   } catch (error) {
     console.error("Failed to record entry answers", error);
+    return workspace.entry;
   }
 }
 
+/** Starts reading their site once we have a URL we haven't read yet. */
+async function readSiteIfNew(workspace: Workspace, entry: Workspace["entry"], messages: OnboardingUIMessage[]) {
+  const { status, url } = entry.website;
+  if (status !== "has" || !url || workspace.crawl?.url === url) return;
+  const afterMessageId = messages.findLast((m) => m.role === "user")?.id ?? null;
+  await readAndProfileSite({ workspaceId: workspace.id, url, afterMessageId });
+}
+
 /**
- * One Getting Started turn, as a UI message stream. The reply streams right
- * away while the user's answers are recorded in parallel. (Recording first was
- * tried: ~1.8s slower to first token with no fewer re-asks.) Shared by the chat
- * route and the evals.
+ * One Getting Started turn. The reply streams right away while the user's
+ * answers are recorded in parallel. (Recording first was tried: ~1.8s slower to
+ * first token with no fewer re-asks.) Returns the UI message stream plus
+ * `background`, work that outlives the reply (reading their site, profile notes), for the
+ * caller to keep alive. Shared by the chat route and the evals.
  */
 export async function onboardingTurn({
   workspaceId,
   messages,
   onSaved,
+  readSite = true,
 }: {
   workspaceId: string;
   messages: OnboardingUIMessage[];
   onSaved: (messages: OnboardingUIMessage[]) => Promise<void>;
+  /** Off in the entry eval, whose personas have made-up websites. */
+  readSite?: boolean;
 }) {
   const [workspace, docs] = await Promise.all([getWorkspace(workspaceId), getDocs(workspaceId)]);
   const recording = recordEntryAnswers(workspace, messages);
+  const background = Promise.all([
+    recording.then((entry) => (readSite ? readSiteIfNew(workspace, entry, messages) : undefined)),
+    recordProfileNotes(workspaceId, messages),
+  ]);
 
-  return createUIMessageStream<OnboardingUIMessage>({
+  const stream = createUIMessageStream<OnboardingUIMessage>({
     originalMessages: messages,
     execute: async ({ writer }) => {
       const result = streamText({
@@ -62,4 +82,5 @@ export async function onboardingTurn({
       await onSaved(messages);
     },
   });
+  return { stream, background };
 }

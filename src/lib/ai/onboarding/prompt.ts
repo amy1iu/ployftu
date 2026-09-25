@@ -1,5 +1,6 @@
 import { catalogForPrompt, getIntent, quickWins } from "@/lib/catalog";
 import type { Doc, Workspace } from "@/lib/db/types";
+import type { SiteCrawl } from "@/lib/site/types";
 import { branchNames, defaultQuickWin, entryBranch, topIntent, type Entry, type EntryBranch } from "@/lib/onboarding/entry";
 
 function describeEntry(entry: Entry) {
@@ -20,6 +21,19 @@ function describeEntry(entry: Entry) {
   return `- Website: ${site}\n- Goals: ${goals}${entry.goals.unmatched ? `\n- Asked for something Ploy doesn't cover: "${entry.goals.unmatched}"` : ""}`;
 }
 
+function describeSite(crawl: SiteCrawl | null) {
+  if (!crawl) return "";
+  const status = {
+    reading: "You're reading their site right now (a card in the chat shows progress). You can say so, but don't describe what's on it yet.",
+    summarizing: "You're reading their site right now (a card in the chat shows progress). You can say so, but don't describe what's on it yet.",
+    done: crawl.confirmedAt
+      ? "You've read their site and they confirmed the profile you drafted from it (see the docs below)."
+      : "You've read their site and drafted their Business Overview and Brand Guidelines from it (see the docs below). A card in the chat is asking them to confirm it. You can refer to what you learned.",
+    failed: "You couldn't read their site. Don't describe its contents; learn about the business by asking instead.",
+  }[crawl.status];
+  return `- Site reading: ${status}`;
+}
+
 const pathPlaybooks: Record<EntryBranch, string> = {
   A: "Say back their site and goal in one sentence, then ask the goal's follow-up questions, one at a time.",
   B: "They're not sure about goals, so never ask about goals again. In your message, suggest 2-3 likely opportunities (from the intents) as statements and say you'll refine them once you've gone through their site. Your question is about their business: what they sell if you don't know, otherwise who their best customers are.",
@@ -29,14 +43,26 @@ const pathPlaybooks: Record<EntryBranch, string> = {
 
 // The reply runs in parallel with recording the user's latest message, so
 // until both answers are in, the model works out its step from the conversation.
-function entryFlow(entry: Entry) {
+function entryFlow(entry: Entry, crawl: SiteCrawl | null, knowsWhatTheySell: boolean) {
   const branch = entryBranch(entry);
+  if (branch === "B" && crawl?.opportunities.length) {
+    const quickWin = quickWins[defaultQuickWin(entry)!].spec.name;
+    return `Both entry questions are answered: path B · ${branchNames.B}.
+They're not sure about goals, so never ask about goals again. In your message, suggest these opportunities you spotted on their site, as statements:
+${crawl.opportunities.map((o) => `- ${o.title} (${o.why})`).join("\n")}
+Your question is about their business: who their best customers are.
+The first deliverable you'll make for them is "${quickWin}". After 2-3 follow-ups, tell them you have what you need and their ${quickWin.toLowerCase()} is coming up next. Never write the deliverable itself in the chat.`;
+  }
   if (branch) {
     const quickWin = quickWins[defaultQuickWin(entry)!].spec.name;
     const intent = topIntent(entry);
     const probes = intent ? ` Follow-ups: ${getIntent(intent).probes.join(" / ")}` : "";
+    const firstAsk =
+      (branch === "C" || branch === "D") && !knowsWhatTheySell
+        ? `\nYou don't know what they sell yet${crawl?.status === "failed" ? " (their site couldn't be read, so say so briefly)" : ""}: your question this turn is what their business sells, in a sentence.`
+        : "";
     return `Both entry questions are answered: path ${branch} · ${branchNames[branch]}.
-${pathPlaybooks[branch]}${probes}
+${pathPlaybooks[branch]}${probes}${firstAsk}
 The first deliverable you'll make for them is "${quickWin}". After 2-3 follow-ups, tell them you have what you need and their ${quickWin.toLowerCase()} is coming up next. Never write the deliverable itself in the chat.`;
   }
   return `Work out from the conversation, including their latest message, which step you're on. Do these steps in order, skipping any already answered anywhere in the conversation, and don't ask about anything else until both the website and goals are answered:
@@ -56,7 +82,7 @@ export function buildSystemPrompt({ workspace, docs }: { workspace: Workspace; d
 - Never ask for something you already know. Before asking, check their latest message: if it already answers that step, move on to the next one.
 - If the user says no or isn't sure, always offer something concrete Ploy can do instead. Never leave them at a dead end.
 - If they ask for something Ploy doesn't do, say so honestly and offer the closest thing Ploy does.
-- Never invent facts about their business. You haven't read, scraped, or scanned their site and haven't built anything yet, so never say you have.
+- Never invent facts about their business. Only describe their site once you've read it (see Site reading below). You haven't built anything for them yet, so never say you have.
 - Don't ask the user to pick a deliverable or a Ploybook, and never write one in the chat. You choose the first deliverable for them; it's built separately.
 - Reply chips: 2-4 short answers (2-6 words) the user could tap, in their voice, specific to their business. When asking about goals, offer the 2-3 most relevant intent labels plus "Not sure yet, suggest something". When asking about a website: "I don't have a website yet", "It's not live yet". Never offer something they already told you, and never list the options in your message.
 - Markdown is fine: bold and short lists. No headings.
@@ -65,7 +91,8 @@ export function buildSystemPrompt({ workspace, docs }: { workspace: Workspace; d
 First learn two things: (1) do they have a website, (2) do they have goals. Their answers decide the rest of onboarding.
 What's recorded so far:
 ${describeEntry(workspace.entry)}
-${entryFlow(workspace.entry)}
+${describeSite(workspace.crawl)}
+${entryFlow(workspace.entry, workspace.crawl, docs.find((d) => d.slug === "business-overview")?.sections["what-we-do"]?.status !== "empty")}
 
 # What Ploy can do
 ${catalogForPrompt()}

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { OnboardingStatus } from "@/lib/db/types";
 import { createWorkspace, openWorkspace, setOnboardingStatus } from "@/lib/db/workspaces";
+import { confirmSiteProfile } from "@/lib/site/run";
 
 // Single-user demo: no auth checks. Revalidating the layout swaps in the new
 // workspace's snapshot without a visible reload.
@@ -22,4 +23,8 @@ export async function switchWorkspace(id: string) {
 
 export async function updateOnboardingStatus(workspaceId: string, status: OnboardingStatus) {
   await setOnboardingStatus(workspaceId, status);
+}
+
+export async function confirmProfile(workspaceId: string) {
+  await confirmSiteProfile(workspaceId);
 }

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { entryUpdateSchema } from "@/lib/ai/onboarding/extract";
+import { profileNotesSchema } from "@/lib/ai/onboarding/profile-notes";
 import { replySchema } from "@/lib/ai/onboarding/reply";
+import { siteSummarySchema } from "@/lib/site/summarize";
 import { agentTools, allSpecs, getSpec, intents, primitives, quickWins, regionIds, regions } from ".";
 
 describe("catalog integrity", () => {
@@ -56,6 +58,8 @@ describe("schemas are OpenAI strict-mode compatible", () => {
   const schemas: [string, z.ZodType][] = [
     ["entry extraction", entryUpdateSchema],
     ["onboarding reply", replySchema],
+    ["profile notes", profileNotesSchema],
+    ["site summary", siteSummarySchema],
     ...Object.entries(quickWins).map(([id, q]) => [`quick win ${id}`, q.output] as [string, z.ZodType]),
     ...Object.entries(primitives).flatMap(([pid, p]) =>
       Object.entries(p.actions).map(([aid, a]) => [`${pid}.${aid}`, a.input] as [string, z.ZodType]),

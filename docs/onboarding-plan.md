@@ -23,7 +23,7 @@ The first turns answer two questions; everything later branches on them.
 
 ```
 Greeting: "Do you have a website?" (+ what we can do if not)
-   ├─ URL ────────────────► (crawl in background, phase 2)
+   ├─ URL ────────────────► (site read in background → profile card)
    └─ no / not live ──────► "Tell me what you do"
                   ▼
 "Is there a goal you're working toward?" (+ "not sure? I'll suggest")
@@ -52,7 +52,7 @@ Answers can come in any order or all at once; the agent never re-asks.
 ## Phases
 
 1. **Foundation + entry flow** (done): schema, workspaces with Start fresh and switcher, persistent layout, Realtime store, pinned Getting Started, catalogs, two-question entry flow with paths A-D, answers written to Docs, evals.
-2. **Understand the business:** Firecrawl crawl with streaming progress and cache, profile playback card, post-turn extractor for the rest of the profile, Docs tab.
+2. **Understand the business** (done): Firecrawl site reading with live progress and a week-long cache, profile playback card (Looks right / Fix something), Brand Guidelines from branding, site-specific opportunities for path B, background profile notes, graceful fallback when a site can't be read.
 3. **First value:** start the quick win, real deliverable with fallback, task ploy view (chattable), completion pop-up.
 4. **The map:** hub-and-spoke map with focus emphasis and fog, ranking/personalization, derived node state, node drawer to start a Ploybook, mock connect modal.
 5. **Polish:** wrap-up plan, mark done/skip, failure paths, demo speed, events, narrow screens, fixture workspace.

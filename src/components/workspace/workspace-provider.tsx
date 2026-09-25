@@ -18,14 +18,11 @@ type Row = Record<string, unknown>;
 const rowId = (table: ListTable, row: Row) => (table === "integrations" ? row.provider : row.id);
 
 type Action =
-  | { type: "reset"; snapshot: WorkspaceSnapshot }
   | { type: "workspace"; row: Row }
   | { type: "change"; table: ListTable; event: "INSERT" | "UPDATE" | "DELETE"; row: Row; old: Row };
 
 function reducer(state: WorkspaceSnapshot, action: Action): WorkspaceSnapshot {
   switch (action.type) {
-    case "reset":
-      return action.snapshot;
     case "workspace": {
       const workspace = { ...state.workspace, ...action.row };
       return {
@@ -55,15 +52,14 @@ const WorkspaceContext = createContext<WorkspaceSnapshot | null>(null);
 const OnboardingChatContext = createContext<Chat<OnboardingUIMessage> | null>(null);
 
 /**
- * Holds one workspace's data for the whole app frame. Realtime keeps it fresh,
- * so pages read from here instead of refetching. Also owns the Getting Started
+ * Holds one workspace's data for the whole app frame. It's seeded once per
+ * workspace (the layout keys it by id) and Realtime keeps it fresh from there;
+ * re-seeding from a later server render could roll it back to a stale snapshot. Also owns the Getting Started
  * chat, so a reply keeps streaming while the user is on another route.
  */
 export function WorkspaceProvider({ initial, children }: { initial: WorkspaceSnapshot; children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initial);
   const workspaceId = initial.workspace.id;
-
-  useEffect(() => dispatch({ type: "reset", snapshot: initial }), [initial]);
 
   const [chat] = useState(() => {
     const ploy = initial.ploys.find((p) => p.kind === "onboarding")!;

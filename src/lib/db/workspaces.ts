@@ -121,14 +121,32 @@ export async function saveOnboardingMessages(workspaceId: string, messages: UIMe
 export type SectionPatch = {
   slug: ProfileDocSlug;
   key: string;
-  body: string;
+  /** New section content, or null to only change its status. */
+  body: string | null;
+  /** Only write if the section is still empty. */
+  ifEmpty?: boolean;
   status: SectionMeta["status"];
   source: SectionMeta["source"];
 };
 
-/** Rewrites individual `## ` sections of profile docs, leaving the rest untouched. */
-export async function patchProfileSections(workspaceId: string, patches: SectionPatch[]) {
-  if (!patches.length) return;
+// Doc patches are read-modify-write, so they run one at a time per workspace
+// (the site reader, branding, and chat recording can all land at once).
+const docQueues = new Map<string, Promise<void>>();
+
+/**
+ * Rewrites individual `## ` sections of profile docs, leaving the rest untouched.
+ * Inferred content (e.g. from the website) never overwrites what the user confirmed.
+ */
+export function patchProfileSections(workspaceId: string, patches: SectionPatch[]) {
+  if (!patches.length) return Promise.resolve();
+  const run = (docQueues.get(workspaceId) ?? Promise.resolve()).then(() => applySectionPatches(workspaceId, patches));
+  const queued = run.catch(() => {});
+  docQueues.set(workspaceId, queued);
+  void queued.then(() => docQueues.get(workspaceId) === queued && docQueues.delete(workspaceId));
+  return run;
+}
+
+async function applySectionPatches(workspaceId: string, patches: SectionPatch[]) {
   const docs = await getDocs(workspaceId);
   const now = new Date().toISOString();
   const bySlug = Map.groupBy(patches, (p) => p.slug);
@@ -139,7 +157,9 @@ export async function patchProfileSections(workspaceId: string, patches: Section
       let content = doc.content_md;
       const sections = { ...doc.sections };
       for (const p of docPatches) {
-        content = patchSection(content, getProfileSection(slug, p.key).heading, p.body);
+        if (p.status === "inferred" && sections[p.key]?.status === "confirmed") continue;
+        if (p.ifEmpty && sections[p.key] && sections[p.key].status !== "empty") continue;
+        if (p.body !== null) content = patchSection(content, getProfileSection(slug, p.key).heading, p.body);
         sections[p.key] = { status: p.status, source: p.source, updatedAt: now };
       }
       check(

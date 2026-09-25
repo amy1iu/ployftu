@@ -35,12 +35,14 @@ export async function applyEntryUpdate(workspaceId: string, update: EntryUpdate,
     const { status } = update.website;
     if (status === "has") {
       const url = update.website.url && normalizeUrl(update.website.url);
-      if (url) {
+      // A URL we already tried and couldn't read stays unreadable when it comes up again.
+      const knownUnreadable = before.website.status === "unreadable" && before.website.url === url;
+      if (url && !knownUnreadable) {
         entry.website = { status, url };
         fields.website_url = url;
         if (workspace.name === "New workspace") fields.name = nameFromUrl(url);
         patches.push({ slug: "business-overview", key: "website", body: url, status: "confirmed", source: "user" });
-      } else {
+      } else if (!url) {
         problems.push(
           `"${update.website.url ?? ""}" doesn't look like a valid URL. Ask the user to double-check the link; don't record it.`,
         );
@@ -84,12 +86,13 @@ export async function applyEntryUpdate(workspaceId: string, update: EntryUpdate,
     );
   }
 
+  // Fills these in only while empty; corrections to existing content (e.g. from
+  // their site) are merged in by recordProfileNotes instead.
   if (update.business) {
     const { whatTheyDo, whoTheyServe } = update.business;
-    if (whatTheyDo)
-      patches.push({ slug: "business-overview", key: "what-we-do", body: whatTheyDo, status: "confirmed", source: "user" });
-    if (whoTheyServe)
-      patches.push({ slug: "business-overview", key: "who-we-serve", body: whoTheyServe, status: "confirmed", source: "user" });
+    const user = { status: "confirmed", source: "user", ifEmpty: true } as const;
+    if (whatTheyDo) patches.push({ slug: "business-overview", key: "what-we-do", body: whatTheyDo, ...user });
+    if (whoTheyServe) patches.push({ slug: "business-overview", key: "who-we-serve", body: whoTheyServe, ...user });
   }
 
   await Promise.all([

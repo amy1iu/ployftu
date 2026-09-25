@@ -4,6 +4,7 @@ import { intentIds, intents } from "@/lib/catalog";
 import type { Entry } from "@/lib/onboarding/entry";
 import type { EntryUpdate } from "@/lib/onboarding/set-entry";
 import { models } from "../models";
+import { isQuoted, textOf } from "./text";
 
 // Schemas use .nullable() instead of .optional(): OpenAI strict mode requires every field.
 export const entryUpdateSchema = z.object({
@@ -67,11 +68,6 @@ Examples:
 Intents:
 ${intents.map((i) => `- ${i.id}: ${i.label} (e.g. ${i.examples.join(", ")})`).join("\n")}`;
 
-const textOf = (m: UIMessage) =>
-  m.parts
-    .map((p) => (p.type === "text" ? p.text : ""))
-    .join("")
-    .trim();
 
 /**
  * Pulls entry answers out of the conversation, focused on the user's latest
@@ -95,16 +91,7 @@ ${conversation}`,
   });
 
   // Drop any answer the user didn't actually give: its quote must appear in their messages.
-  const said = normalize(messages.filter((m) => m.role === "user").map(textOf).join("\n"));
-  const grounded = <T extends { evidence: string } | null>(field: T) =>
-    field && normalize(field.evidence) && said.includes(normalize(field.evidence)) ? field : null;
+  const said = messages.filter((m) => m.role === "user").map(textOf).join("\n");
+  const grounded = <T extends { evidence: string } | null>(field: T) => (field && isQuoted(field.evidence, said) ? field : null);
   return { website: grounded(output.website), goals: grounded(output.goals), business: grounded(output.business) };
 }
-
-const normalize = (text: string) =>
-  text
-    .toLowerCase()
-    .replace(/[’‘]/g, "'")
-    .replace(/[^a-z0-9.'/ -]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();

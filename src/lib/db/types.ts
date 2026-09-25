@@ -2,6 +2,7 @@ import type { UIMessage } from "ai";
 import type { PloybookSpec } from "@/lib/catalog";
 import type { SectionMeta } from "@/lib/docs/profile";
 import type { Entry } from "@/lib/onboarding/entry";
+import type { SiteCrawl } from "@/lib/site/types";
 
 // Row shapes for the tables in supabase/migrations/20260924000000_workspaces.sql.
 
@@ -18,6 +19,7 @@ export type Workspace = {
   favicon_url: string | null;
   brand_color: string | null;
   entry: Entry;
+  crawl: SiteCrawl | null;
   onboarding_status: OnboardingStatus;
   is_eval: boolean;
   created_at: string;

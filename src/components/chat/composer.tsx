@@ -1,18 +1,34 @@
 "use client";
 
 import { ArrowUp, Plus } from "lucide-react";
-import { useState } from "react";
+import { useImperativeHandle, useRef, useState, type Ref } from "react";
+
+/** Lets a parent start a message for the user, e.g. "Actually, " after "Fix something". */
+export type ComposerHandle = { setDraft: (text: string) => void };
 
 export function Composer({
   onSend,
   disabled,
   placeholder = "Type your message...",
+  ref,
 }: {
   onSend: (text: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  ref?: Ref<ComposerHandle>;
 }) {
   const [input, setInput] = useState("");
+  const textarea = useRef<HTMLTextAreaElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    setDraft(text) {
+      setInput(text);
+      requestAnimationFrame(() => {
+        textarea.current?.focus();
+        textarea.current?.setSelectionRange(text.length, text.length);
+      });
+    },
+  }));
   const canSend = input.trim().length > 0 && !disabled;
 
   function submit() {
@@ -30,6 +46,7 @@ export function Composer({
       className="flex h-[109px] flex-col rounded-xl border border-border bg-surface px-3 pt-[15px] pb-2 shadow-[0_2px_6px_rgba(0,0,0,0.06)]"
     >
       <textarea
+        ref={textarea}
         autoFocus
         value={input}
         onChange={(e) => setInput(e.currentTarget.value)}

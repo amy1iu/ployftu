@@ -30,9 +30,15 @@ export function WorkspaceSwitcher() {
         onClick={() => setOpen((o) => !o)}
         className="flex h-[38px] w-full items-center gap-2.5 rounded-lg border border-[#f0f0f0] bg-surface pr-3 pl-[5px] text-left"
       >
-        <span className="flex size-6 items-center justify-center rounded-[5px] bg-[#0f0f0f] text-[13px] font-medium text-white">
-          {workspace.name.charAt(0).toUpperCase()}
-        </span>
+        {workspace.favicon_url ? (
+          // The favicon from their site; external, so a plain img.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={workspace.favicon_url} alt="" className="size-6 rounded-[5px] object-contain" />
+        ) : (
+          <span className="flex size-6 items-center justify-center rounded-[5px] bg-[#0f0f0f] text-[13px] font-medium text-white">
+            {workspace.name.charAt(0).toUpperCase()}
+          </span>
+        )}
         <span className="flex-1 truncate text-[14px]">{pending ? "Switching…" : workspace.name}</span>
         <ChevronDown size={18} strokeWidth={2} className="text-[#3a3a3a]" />
       </button>

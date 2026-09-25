@@ -10,6 +10,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { generateText, Output, readUIMessageStream, type UIMessageChunk } from "ai";
 import { z } from "zod";
 import { onboardingTurn, type OnboardingUIMessage } from "@/lib/ai/onboarding";
+import { textOf } from "@/lib/ai/onboarding/text";
 import { getIntent } from "@/lib/catalog/intents";
 import { createWorkspace, getDocs, getWorkspace } from "@/lib/db/workspaces";
 import { readSection } from "@/lib/docs/markdown";
@@ -31,7 +32,6 @@ const selected = filters.length
   ? personas.filter((p) => filters.some((f) => (f.endsWith("*") ? p.id.startsWith(f.slice(0, -1)) : p.id === f)))
   : personas;
 
-const textOf = (m: OnboardingUIMessage) => m.parts.map((p) => (p.type === "text" ? p.text : "")).join("").trim();
 const chipsOf = (m: OnboardingUIMessage) =>
   m.parts.flatMap((p) => (p.type === "data-replies" ? p.data.options : []));
 
@@ -75,7 +75,7 @@ Reply as this person would, answering what the assistant asked. Keep it short (1
 async function runTurn(workspaceId: string, messages: OnboardingUIMessage[]) {
   const started = performance.now();
   let firstText: number | null = null;
-  const stream = await onboardingTurn({ workspaceId, messages, onSaved: async () => {} });
+  const { stream } = await onboardingTurn({ workspaceId, messages, onSaved: async () => {}, readSite: false });
   const timed = stream.pipeThrough(
     new TransformStream<UIMessageChunk, UIMessageChunk>({
       transform(chunk, controller) {
