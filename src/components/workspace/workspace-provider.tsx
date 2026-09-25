@@ -40,9 +40,11 @@ function reducer(state: WorkspaceSnapshot, action: Action): WorkspaceSnapshot {
       const rest = list.filter((r) => rowId(action.table, r) !== id);
       if (action.event === "DELETE") return { ...state, [key]: rest };
       const exists = rest.length !== list.length;
+      // Merge rather than replace: Postgres leaves large unchanged columns (like a
+      // ploy's messages) out of update events.
       return {
         ...state,
-        [key]: exists ? list.map((r) => (rowId(action.table, r) === id ? action.row : r)) : [...list, action.row],
+        [key]: exists ? list.map((r) => (rowId(action.table, r) === id ? { ...r, ...action.row } : r)) : [...list, action.row],
       };
     }
   }

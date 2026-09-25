@@ -95,6 +95,9 @@ export async function applyEntryUpdate(workspaceId: string, update: EntryUpdate,
     if (whoTheyServe) patches.push({ slug: "business-overview", key: "who-we-serve", body: whoTheyServe, ...user });
   }
 
+  const branch = entryBranch(entry);
+  if (branch && !entryBranch(before)) entry.resolvedAtTurn = ctx.userTurns;
+
   await Promise.all([
     updateWorkspace(workspaceId, { ...fields, entry }),
     patchProfileSections(workspaceId, patches),
@@ -108,7 +111,6 @@ export async function applyEntryUpdate(workspaceId: string, update: EntryUpdate,
       logEvent(workspaceId, "goals_answered", { status: entry.goals.status, intents: entry.goals.intents.map((i) => i.id) }),
     );
   if (update.goals?.unmatched) events.push(logEvent(workspaceId, "unmatched_intent", { text: update.goals.unmatched }));
-  const branch = entryBranch(entry);
   if (branch && !entryBranch(before))
     events.push(logEvent(workspaceId, "branch_resolved", { branch, userTurns: ctx.userTurns }));
   await Promise.all(events);

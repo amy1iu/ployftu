@@ -169,3 +169,35 @@ async function applySectionPatches(workspaceId: string, patches: SectionPatch[])
     }),
   );
 }
+
+export async function getPloys(workspaceId: string) {
+  return must(
+    await db().from("ploys").select().eq("workspace_id", workspaceId).order("created_at").returns<Ploy[]>(),
+    "get ploys",
+  );
+}
+
+export async function getPloy(id: string) {
+  return must(await db().from("ploys").select().eq("id", id).single<Ploy>(), "get ploy");
+}
+
+export async function createPloy(fields: Pick<Ploy, "workspace_id" | "title" | "spec" | "status" | "messages">) {
+  return must(await db().from("ploys").insert({ ...fields, kind: "task" }).select().single<Ploy>(), "create ploy");
+}
+
+export async function updatePloy(id: string, fields: Partial<Pick<Ploy, "status" | "messages" | "unread">>) {
+  check(await db().from("ploys").update({ ...fields, updated_at: new Date().toISOString() }).eq("id", id), "update ploy");
+}
+
+/** Creates or replaces a deliverable Doc (one per slug per workspace). */
+export async function saveDeliverableDoc(workspaceId: string, slug: string, title: string, contentMd: string) {
+  check(
+    await db()
+      .from("docs")
+      .upsert(
+        { workspace_id: workspaceId, slug, title, kind: "deliverable", content_md: contentMd, updated_at: new Date().toISOString() },
+        { onConflict: "workspace_id,slug" },
+      ),
+    "save deliverable doc",
+  );
+}

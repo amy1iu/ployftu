@@ -13,11 +13,14 @@ export type Entry = {
     inUserWords: string | null;
     unmatched: string | null;
   };
+  /** The user turn on which both answers were in; the first deliverable starts after it. */
+  resolvedAtTurn?: number | null;
 };
 
 export const emptyEntry: Entry = {
   website: { status: "unknown", url: null },
   goals: { status: "unknown", intents: [], inUserWords: null, unmatched: null },
+  resolvedAtTurn: null,
 };
 
 /**

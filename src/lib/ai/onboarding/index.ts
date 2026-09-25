@@ -1,6 +1,8 @@
 import { convertToModelMessages, createUIMessageStream, Output, streamText } from "ai";
 import type { Workspace } from "@/lib/db/types";
-import { getDocs, getWorkspace } from "@/lib/db/workspaces";
+import { getDocs, getPloys, getWorkspace } from "@/lib/db/workspaces";
+import { runQuickWin } from "@/lib/quick-wins/run";
+import { quickWinToStart, startQuickWin } from "@/lib/quick-wins/start";
 import { applyEntryUpdate } from "@/lib/onboarding/set-entry";
 import { readAndProfileSite } from "@/lib/site/run";
 import { models } from "../models";
@@ -41,7 +43,7 @@ async function readSiteIfNew(workspace: Workspace, entry: Workspace["entry"], me
  * One Getting Started turn. The reply streams right away while the user's
  * answers are recorded in parallel. (Recording first was tried: ~1.8s slower to
  * first token with no fewer re-asks.) Returns the UI message stream plus
- * `background`, work that outlives the reply (reading their site, profile notes), for the
+ * `background`, work that outlives the reply (reading their site, profile notes, the first deliverable), for the
  * caller to keep alive. Shared by the chat route and the evals.
  */
 export async function onboardingTurn({
@@ -56,11 +58,19 @@ export async function onboardingTurn({
   /** Off in the entry eval, whose personas have made-up websites. */
   readSite?: boolean;
 }) {
-  const [workspace, docs] = await Promise.all([getWorkspace(workspaceId), getDocs(workspaceId)]);
+  const [workspace, docs, ploys] = await Promise.all([getWorkspace(workspaceId), getDocs(workspaceId), getPloys(workspaceId)]);
   const recording = recordEntryAnswers(workspace, messages);
+
+  // Once we know enough, the first deliverable starts in its own task ploy.
+  const userTurns = messages.filter((m) => m.role === "user").length;
+  const recipe = quickWinToStart({ workspace, docs, ploys, userTurns });
+  const started = recipe ? await startQuickWin(workspace, recipe) : null;
+  const quickWin = started ?? ploys.find((p) => p.spec?.source === "quick_win") ?? null;
+
   const background = Promise.all([
     recording.then((entry) => (readSite ? readSiteIfNew(workspace, entry, messages) : undefined)),
     recordProfileNotes(workspaceId, messages),
+    started && runQuickWin(workspaceId, started.id),
   ]);
 
   const stream = createUIMessageStream<OnboardingUIMessage>({
@@ -68,11 +78,16 @@ export async function onboardingTurn({
     execute: async ({ writer }) => {
       const result = streamText({
         model: models.chat,
-        system: buildSystemPrompt({ workspace, docs }),
+        system: buildSystemPrompt({
+          workspace,
+          docs,
+          quickWin: quickWin && { name: quickWin.title, state: started ? "starting" : quickWin.status === "done" ? "done" : "running" },
+        }),
         messages: await convertToModelMessages(messages),
         providerOptions: models.chatOptions,
         output: Output.object({ schema: replySchema }),
       });
+      if (started) writer.write({ type: "data-taskStarted", data: { ployId: started.id, title: started.title } });
       const { replies } = await writeReply(writer, result);
       if (replies.length) writer.write({ type: "data-replies", data: { options: replies.slice(0, 4) } });
       writer.write({ type: "finish" });

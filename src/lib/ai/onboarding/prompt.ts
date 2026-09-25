@@ -51,7 +51,7 @@ function entryFlow(entry: Entry, crawl: SiteCrawl | null, knowsWhatTheySell: boo
 They're not sure about goals, so never ask about goals again. In your message, suggest these opportunities you spotted on their site, as statements:
 ${crawl.opportunities.map((o) => `- ${o.title} (${o.why})`).join("\n")}
 Your question is about their business: who their best customers are.
-The first deliverable you'll make for them is "${quickWin}". After 2-3 follow-ups, tell them you have what you need and their ${quickWin.toLowerCase()} is coming up next. Never write the deliverable itself in the chat.`;
+The first deliverable you'll make for them is "${quickWin}"; it starts automatically once you know enough. Never write it in the chat.`;
   }
   if (branch) {
     const quickWin = quickWins[defaultQuickWin(entry)!].spec.name;
@@ -63,7 +63,7 @@ The first deliverable you'll make for them is "${quickWin}". After 2-3 follow-up
         : "";
     return `Both entry questions are answered: path ${branch} · ${branchNames[branch]}.
 ${pathPlaybooks[branch]}${probes}${firstAsk}
-The first deliverable you'll make for them is "${quickWin}". After 2-3 follow-ups, tell them you have what you need and their ${quickWin.toLowerCase()} is coming up next. Never write the deliverable itself in the chat.`;
+The first deliverable you'll make for them is "${quickWin}"; it starts automatically once you know enough. Never write it in the chat.`;
   }
   return `Work out from the conversation, including their latest message, which step you're on. Do these steps in order, skipping any already answered anywhere in the conversation, and don't ask about anything else until both the website and goals are answered:
 1. Website: if they haven't said whether they have one, ask. Read obvious typos (like "acme,com") as the URL they meant; only ask them to double-check a URL you can't make sense of.
@@ -73,7 +73,26 @@ If they've said anywhere, even alongside other answers, that they're not sure wh
 The recorded state above is from before their latest message.`;
 }
 
-export function buildSystemPrompt({ workspace, docs }: { workspace: Workspace; docs: Doc[] }) {
+export type QuickWinState = { name: string; state: "starting" | "running" | "done" };
+
+function describeQuickWin(quickWin: QuickWinState | null) {
+  if (!quickWin) return "";
+  return {
+    starting: `- First deliverable: you just started building their ${quickWin.name.toLowerCase()} in its own ploy. Say so in one short sentence (it pops up when ready), then carry on.`,
+    running: `- First deliverable: their ${quickWin.name.toLowerCase()} is being built. Don't bring it up unless they ask.`,
+    done: `- First deliverable: their ${quickWin.name.toLowerCase()} is ready; they can open it from the pop-up or the sidebar. Don't bring it up unless they ask.`,
+  }[quickWin.state];
+}
+
+export function buildSystemPrompt({
+  workspace,
+  docs,
+  quickWin = null,
+}: {
+  workspace: Workspace;
+  docs: Doc[];
+  quickWin?: QuickWinState | null;
+}) {
   return `You are Ploy's onboarding guide. Ploy is a marketing platform: it builds on-brand sites and content, and runs growth automations (Ploybooks) made of building blocks called primitives. In the user's first few minutes, you learn their business and show them what Ploy can do for them.
 
 # How you talk
@@ -92,6 +111,7 @@ First learn two things: (1) do they have a website, (2) do they have goals. Thei
 What's recorded so far:
 ${describeEntry(workspace.entry)}
 ${describeSite(workspace.crawl)}
+${describeQuickWin(quickWin)}
 ${entryFlow(workspace.entry, workspace.crawl, docs.find((d) => d.slug === "business-overview")?.sections["what-we-do"]?.status !== "empty")}
 
 # What Ploy can do

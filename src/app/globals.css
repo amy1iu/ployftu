@@ -28,6 +28,13 @@
   --color-accent-soft: #eef0ff;
 }
 
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

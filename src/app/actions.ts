@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { OnboardingStatus } from "@/lib/db/types";
-import { createWorkspace, openWorkspace, setOnboardingStatus } from "@/lib/db/workspaces";
+import { createWorkspace, openWorkspace, setOnboardingStatus, updatePloy } from "@/lib/db/workspaces";
+import { replyInPloy } from "@/lib/quick-wins/reply";
 import { confirmSiteProfile } from "@/lib/site/run";
 
 // Single-user demo: no auth checks. Revalidating the layout swaps in the new
@@ -27,4 +28,12 @@ export async function updateOnboardingStatus(workspaceId: string, status: Onboar
 
 export async function confirmProfile(workspaceId: string) {
   await confirmSiteProfile(workspaceId);
+}
+
+export async function markPloyRead(ployId: string) {
+  await updatePloy(ployId, { unread: false });
+}
+
+export async function sendPloyMessage(ployId: string, text: string) {
+  await replyInPloy(ployId, text);
 }

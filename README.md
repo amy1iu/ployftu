@@ -19,6 +19,7 @@ npm run dev
 | `npm test` | Unit tests: catalog integrity, OpenAI strict-mode schemas, entry logic, doc patching |
 | `npm run check:foundation` | Workspace seeding, isolation between runs, Realtime latency |
 | `npm run check:site [url]` | Reads a real website: progress, drafted profile, branding, time to profile |
+| `npm run check:quick-wins [url]` | Every quick-win recipe produces a real deliverable (no fallback) from a real site's profile |
 | `npm run eval:extract` | Precision of recording answers from single messages |
 | `npm run eval:entry` | 24 simulated users through the real Getting Started flow, scored against the phase 1 gates |
 
@@ -36,6 +37,8 @@ Eval results land in `evals/results/`.
 | `src/lib/onboarding/` | Entry questions and paths (A–D), greeting, tutorial progress |
 | `src/lib/docs/` | Profile docs (Markdown source of truth) and section patching |
 | `src/lib/site/` | Reading the user's website with Firecrawl: key pages, summary, branding, opportunities |
+| `src/lib/quick-wins/` | The first deliverable: when it starts, its task ploy, generation (with fallback), and chat replies |
+| `src/components/task-toasts.tsx` | Side pop-up when a task finishes |
 | `src/lib/db/` | Row types and server-side queries (secret key) |
 | `src/components/workspace/workspace-provider.tsx` | Client store kept fresh by Realtime; owns the Getting Started chat |
 | `evals/` | Foundation checks, extraction eval, persona eval |
@@ -46,3 +49,4 @@ Eval results land in `evals/results/`.
 1. The reply streams immediately, from a prompt holding the entry flowchart and what's recorded so far. It's a structured object (`message`, `question`, `replies`), rendered as the message a sentence at a time, then one bold question, then reply chips (a `data-replies` part), so the format holds on any model.
 2. In parallel, the user's latest message is parsed into structured answers (website, goals, business), each backed by a quote from the user, and written to `workspaces.entry` and the profile Docs.
 3. In the background (`after()`): the first time a URL is recorded, the site is read (homepage + up to 4 key pages, then branding) and summarized into the Business Overview and Brand Guidelines as *inferred*; the chat's site card follows `workspaces.crawl` over Realtime and asks the user to confirm. Separately, anything the user says about their offering, customers, channels, tools, or voice is merged into the Docs.
+4. Once the path is set, the profile says what they sell, and they've answered one follow-up, the turn starts the first deliverable (a quick win) in its own task ploy: a kickoff with a plan card of Ploy primitives, the real deliverable (one retry, then a template fallback), a copy in Docs, and a side pop-up when it's ready.

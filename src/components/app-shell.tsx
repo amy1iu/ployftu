@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { AppSidebar } from "./sidebar/app-sidebar";
+import { TaskToasts } from "./task-toasts";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -21,6 +22,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
         {children}
       </main>
+      <TaskToasts />
     </div>
   );
 }

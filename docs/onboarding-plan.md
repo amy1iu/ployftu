@@ -53,7 +53,7 @@ Answers can come in any order or all at once; the agent never re-asks.
 
 1. **Foundation + entry flow** (done): schema, workspaces with Start fresh and switcher, persistent layout, Realtime store, pinned Getting Started, catalogs, two-question entry flow with paths A-D, answers written to Docs, evals.
 2. **Understand the business** (done): Firecrawl site reading with live progress and a week-long cache, profile playback card (Looks right / Fix something), Brand Guidelines from branding, site-specific opportunities for path B, background profile notes, graceful fallback when a site can't be read.
-3. **First value:** start the quick win, real deliverable with fallback, task ploy view (chattable), completion pop-up.
+3. **First value** (done): the quick win starts automatically once the path is set, the profile knows what they sell, and one follow-up is answered; task ploy with kickoff, live plan card (primitives vs. agent tools), real deliverable per recipe (fallback on failure) saved to Docs; completion pop-up; chattable task ploys; opening the deliverable counts toward the tutorial.
 4. **The map:** hub-and-spoke map with focus emphasis and fog, ranking/personalization, derived node state, node drawer to start a Ploybook, mock connect modal.
 5. **Polish:** wrap-up plan, mark done/skip, failure paths, demo speed, events, narrow screens, fixture workspace.
 6. **Later:** agent-composed Ploybooks.
