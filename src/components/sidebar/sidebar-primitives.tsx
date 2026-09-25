@@ -1,22 +1,34 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 import type { NavItem } from "./nav-config";
 
-// Tabs are mocked: they render as buttons but don't navigate yet.
-const noop = () => {};
+// Rows with an href navigate client-side (no reload); the rest are mocked.
+function RowLink({ href, className, children }: { href?: string; className: string; children: ReactNode }) {
+  if (href)
+    return (
+      <Link href={href} className={className}>
+        {children}
+      </Link>
+    );
+  return (
+    <button type="button" className={className}>
+      {children}
+    </button>
+  );
+}
 
-export function SidebarNavItem({ item, tall }: { item: NavItem; tall?: boolean }) {
+export function SidebarNavItem({ item, tall, active }: { item: NavItem; tall?: boolean; active?: boolean }) {
   const Icon = item.icon;
   return (
-    <button
-      type="button"
-      onClick={noop}
-      className={`flex w-full items-center gap-[9px] rounded-lg px-2 text-left text-[14px] text-muted hover:bg-hover ${
-        tall ? "h-9" : "h-[34px]"
-      }`}
+    <RowLink
+      href={item.href}
+      className={`flex w-full items-center gap-[9px] rounded-lg px-2 text-left text-[14px] ${
+        active ? "bg-active text-foreground" : "text-muted hover:bg-hover"
+      } ${tall ? "h-9" : "h-[34px]"}`}
     >
       <Icon size={20} strokeWidth={1.5} className="shrink-0" />
       <span>{item.label}</span>
-    </button>
+    </RowLink>
   );
 }
 
@@ -38,24 +50,27 @@ export function SidebarSection({
 }
 
 export function SidebarRow({
+  href,
   active,
   trailing,
+  className = "",
   children,
 }: {
+  href?: string;
   active?: boolean;
   trailing?: ReactNode;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={noop}
+    <RowLink
+      href={href}
       className={`flex h-[34px] w-full items-center justify-between rounded-lg px-2 text-left text-[14px] ${
         active ? "bg-active" : "hover:bg-hover"
-      }`}
+      } ${className}`}
     >
       <span className="truncate">{children}</span>
       {trailing}
-    </button>
+    </RowLink>
   );
 }

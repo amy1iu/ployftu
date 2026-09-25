@@ -1,7 +1,13 @@
-import { Bell, ChevronDown, Gift, CircleHelp, Search } from "lucide-react";
-import { activePloyId, currentUser, ploys, recentSites, workspace } from "@/lib/mock-data";
+"use client";
+
+import { Bell, Gift, CircleHelp, Search } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { currentUser, recentSites } from "@/lib/mock-data";
+import { tutorialProgress } from "@/lib/onboarding/tutorial";
+import { useWorkspace } from "../workspace/workspace-provider";
 import { libraryNav, primaryNav } from "./nav-config";
 import { SidebarNavItem, SidebarRow, SidebarSection } from "./sidebar-primitives";
+import { WorkspaceSwitcher } from "./workspace-switcher";
 
 function PanelToggleIcon() {
   return (
@@ -12,7 +18,22 @@ function PanelToggleIcon() {
   );
 }
 
+const statusDot = {
+  idle: <span className="mr-2 size-[7px] rounded-full border border-subtle" />,
+  running: <span className="mr-2 size-[9px] animate-spin rounded-full border-[1.5px] border-subtle border-t-transparent" />,
+  done: <span className="mr-2 size-[7px] rounded-full bg-avatar" />,
+  live: <span className="mr-2 size-[7px] rounded-full bg-avatar ring-2 ring-avatar/30" />,
+};
+
 export function AppSidebar({ onToggle }: { onToggle: () => void }) {
+  const pathname = usePathname();
+  const state = useWorkspace();
+  const { workspace, ploys } = state;
+  const onboarding = ploys.find((p) => p.kind === "onboarding");
+  const tasks = ploys.filter((p) => p.kind === "task").toReversed();
+  const tutorialActive = workspace.onboarding_status === "active";
+  const progress = tutorialProgress(state);
+
   return (
     <aside className="flex h-dvh w-60 shrink-0 flex-col border-r border-sidebar-edge bg-sidebar pr-[9px] pl-[7px]">
       <div className="flex h-[51px] items-center justify-between pr-2.5 pl-2">
@@ -24,16 +45,7 @@ export function AppSidebar({ onToggle }: { onToggle: () => void }) {
         </button>
       </div>
 
-      <button
-        type="button"
-        className="flex h-[38px] w-full items-center gap-2.5 rounded-lg border border-[#f0f0f0] bg-surface pr-3 pl-[5px] text-left"
-      >
-        <span className="flex size-6 items-center justify-center rounded-[5px] bg-[#0f0f0f] text-[13px] font-medium text-white">
-          {workspace.initial}
-        </span>
-        <span className="flex-1 truncate text-[14px]">{workspace.name}</span>
-        <ChevronDown size={18} strokeWidth={2} className="text-[#3a3a3a]" />
-      </button>
+      <WorkspaceSwitcher />
 
       <nav className="flex flex-1 flex-col overflow-y-auto">
         <div className="mt-2 flex flex-col gap-1.5">
@@ -45,7 +57,11 @@ export function AppSidebar({ onToggle }: { onToggle: () => void }) {
         <SidebarSection label="Library" className="mt-[23px]">
           <div className="flex flex-col gap-1.5 pt-[3px]">
             {libraryNav.map((item) => (
-              <SidebarNavItem key={item.id} item={item} />
+              <SidebarNavItem
+                key={item.id}
+                item={item}
+                active={!!item.href && pathname.startsWith(item.href)}
+              />
             ))}
           </div>
         </SidebarSection>
@@ -62,11 +78,32 @@ export function AppSidebar({ onToggle }: { onToggle: () => void }) {
         </SidebarSection>
 
         <SidebarSection label="Your Ploys">
-          {ploys.map((ploy) => (
+          {/* Getting Started is always pinned first, and styled as special while the tutorial is active. */}
+          {onboarding && (
+            <SidebarRow
+              href="/"
+              active={pathname === "/"}
+              className={tutorialActive ? "font-accent text-[17px] text-accent" : ""}
+              trailing={
+                tutorialActive ? (
+                  <span className="rounded-full bg-accent-soft px-1.5 font-sans text-[11px] text-accent tabular-nums">
+                    {progress.done}/{progress.total}
+                  </span>
+                ) : (
+                  statusDot.done
+                )
+              }
+            >
+              {onboarding.title}
+            </SidebarRow>
+          )}
+          {tasks.map((ploy) => (
             <SidebarRow
               key={ploy.id}
-              active={ploy.id === activePloyId}
-              trailing={<span className="mr-2 size-[7px] rounded-full border border-subtle" />}
+              href={`/ploys/${ploy.id}`}
+              active={pathname === `/ploys/${ploy.id}`}
+              className={ploy.unread ? "font-medium" : ""}
+              trailing={statusDot[ploy.status]}
             >
               {ploy.title}
             </SidebarRow>

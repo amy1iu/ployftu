@@ -3,7 +3,15 @@
 import { ArrowUp, Plus } from "lucide-react";
 import { useState } from "react";
 
-export function Composer({ onSend, disabled }: { onSend: (text: string) => void; disabled?: boolean }) {
+export function Composer({
+  onSend,
+  disabled,
+  placeholder = "Type your message...",
+}: {
+  onSend: (text: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
   const [input, setInput] = useState("");
   const canSend = input.trim().length > 0 && !disabled;
 
@@ -31,7 +39,7 @@ export function Composer({ onSend, disabled }: { onSend: (text: string) => void;
             submit();
           }
         }}
-        placeholder="Type your message..."
+        placeholder={placeholder}
         rows={1}
         className="flex-1 resize-none bg-transparent text-[14px] leading-[21px] outline-none placeholder:text-[#5c5c5c]"
       />

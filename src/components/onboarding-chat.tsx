@@ -1,53 +1,80 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { useEffect, useRef } from "react";
-import type { OnboardingUIMessage } from "@/lib/ai/agent";
-import { currentUser } from "@/lib/mock-data";
-import { ChatHeader } from "./chat/chat-header";
+import { useEffect, useRef, useTransition } from "react";
+import { updateOnboardingStatus } from "@/app/actions";
+import { ChatHeader, HeaderMenu } from "./chat/chat-header";
 import { Composer } from "./chat/composer";
 import { Message } from "./chat/message";
-
-// Wording is a placeholder — tweak freely.
-const greeting: OnboardingUIMessage = {
-  id: "greeting",
-  role: "assistant",
-  parts: [
-    {
-      type: "text",
-      text: `Hey ${currentUser.firstName}, welcome to your new workspace! I can help you design and build on-brand web pages, campaigns, and marketing content — and an autonomous growth engine that proactively analyzes your site and optimizes your marketing without you having to do all the work yourself.
-
-To get started: what's your goal? Tell me what you want to move for the business — more leads, a new audience, converting the pipeline you already have — and I'll take it from there.`,
-    },
-  ],
-};
+import { ThinkingIndicator } from "./chat/thinking-indicator";
+import { useOnboardingChat, useWorkspace } from "./workspace/workspace-provider";
 
 export function OnboardingChat() {
-  const { messages, sendMessage, status } = useChat<OnboardingUIMessage>({
-    messages: [greeting],
-  });
+  const chat = useOnboardingChat();
+  const { workspace } = useWorkspace();
+  const { messages, sendMessage, status, error } = useChat({ chat });
   const busy = status === "submitted" || status === "streaming";
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [, startTransition] = useTransition();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const send = (text: string) => sendMessage({ text });
+  const lastAssistant = messages.findLast((m) => m.role === "assistant");
+  const last = messages.at(-1);
+  // From send until the first words of the reply stream in.
+  const thinking =
+    status === "submitted" ||
+    (status === "streaming" && !(last?.role === "assistant" && last.parts.some((p) => p.type === "text" && p.text)));
+  const setStatus = (s: "active" | "completed" | "skipped") =>
+    startTransition(() => updateOnboardingStatus(workspace.id, s));
+
+  const menu =
+    workspace.onboarding_status === "active"
+      ? [
+          { label: "Mark as done", onSelect: () => setStatus("completed") },
+          { label: "Skip tutorial", onSelect: () => setStatus("skipped") },
+        ]
+      : [{ label: "Resume tutorial", onSelect: () => setStatus("active") }];
+
   return (
     <div className="flex h-full flex-col">
-      <ChatHeader title="Getting Started" />
+      <ChatHeader title="Getting Started" actions={<HeaderMenu items={menu} />} />
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[702px] space-y-6 px-4 pt-5 pb-6 text-[14px] leading-[21px]">
           {messages.map((message) => (
-            <Message key={message.id} message={message} />
+            <Message
+              key={message.id}
+              message={message}
+              onReply={!busy && message.id === lastAssistant?.id && lastAssistant === messages.at(-1) ? send : undefined}
+            />
           ))}
+          {thinking && <ThinkingIndicator />}
+          {error && (
+            <p className="px-2 text-[13px] text-red-600">
+              Something went wrong.{" "}
+              <button type="button" className="underline" onClick={() => chat.regenerate()}>
+                Try again
+              </button>
+            </p>
+          )}
           <div ref={bottomRef} />
         </div>
       </div>
 
       <div className="mx-auto w-full max-w-[702px] px-4 pb-[26px]">
-        <Composer disabled={busy} onSend={(text) => sendMessage({ text })} />
+        <Composer
+          disabled={busy}
+          onSend={send}
+          placeholder={
+            workspace.entry.website.status === "unknown"
+              ? "Paste your URL or describe your business"
+              : "Type your message..."
+          }
+        />
       </div>
     </div>
   );

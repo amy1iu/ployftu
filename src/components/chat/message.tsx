@@ -1,6 +1,14 @@
-import type { OnboardingUIMessage } from "@/lib/ai/agent";
+import type { UIMessage } from "ai";
+import type { RepliesData } from "@/lib/ai/onboarding/messages";
+import { Markdown } from "../markdown";
 
-export function Message({ message }: { message: OnboardingUIMessage }) {
+type Props = {
+  message: UIMessage;
+  /** Reply chips are only interactive on the latest assistant message. */
+  onReply?: (text: string) => void;
+};
+
+export function Message({ message, onReply }: Props) {
   if (message.role === "user") {
     const text = message.parts.map((p) => (p.type === "text" ? p.text : "")).join("");
     return (
@@ -11,35 +19,28 @@ export function Message({ message }: { message: OnboardingUIMessage }) {
   }
 
   return (
-    <div className="space-y-1.5 px-2">
+    <div className="space-y-3 px-2">
       {message.parts.map((part, i) => {
         const key = `${message.id}-${i}`;
-        switch (part.type) {
-          case "text":
-            return part.text.split(/\n{2,}/).map((para, j) => (
-              <p key={`${key}-${j}`} className="whitespace-pre-wrap">
-                {para}
-              </p>
-            ));
-          case "tool-recommendProducts":
-            if (part.state !== "output-available") {
-              return (
-                <p key={key} className="text-subtle">
-                  Finding the best fit…
-                </p>
-              );
-            }
-            return (
-              <div key={key} className="grid gap-2">
-                {part.output.map((rec) => (
-                  <div key={rec.productId} className="rounded-xl border border-border bg-surface p-4">
-                    <p className="font-medium">{rec.product.name}</p>
-                    <p className="text-muted">{rec.reason}</p>
-                  </div>
-                ))}
-              </div>
-            );
+        if (part.type === "text") return <Markdown key={key}>{part.text}</Markdown>;
+        if (part.type === "data-replies" && onReply) {
+          const { options } = part.data as RepliesData;
+          return (
+            <div key={key} className="flex flex-wrap gap-2 pt-1">
+              {options.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => onReply(option)}
+                  className="rounded-full border border-border bg-surface px-3 py-1.5 text-[13px] hover:bg-hover"
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          );
         }
+        return null;
       })}
     </div>
   );

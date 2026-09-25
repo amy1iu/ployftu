@@ -10,6 +10,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-accent: var(--font-instrument-serif);
 
   /* Ploy palette, sampled from the reference UI */
   --color-sidebar: #f7f7f7;
@@ -21,6 +22,10 @@
   --color-muted: #5e5e5e;
   --color-subtle: #858585;
   --color-avatar: #679f38;
+
+  /* Onboarding accent: marks Getting Started while the tutorial is active */
+  --color-accent: #4f46e5;
+  --color-accent-soft: #eef0ff;
 }
 
 body {
