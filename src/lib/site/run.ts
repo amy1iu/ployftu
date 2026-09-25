@@ -93,12 +93,12 @@ export async function readAndProfileSite({
       ? (void save({ pages: cached.pages.map((p) => ({ url: p.url, path: p.path, status: "done" as const })) }), cached.pages)
       : await readPages(url, (progress) => void save({ pages: progress }));
     await save({ status: "summarizing" });
-    const { summary, opportunities } = await summarizeSite(url, pages);
+    const { summary, opportunities } = cached?.summary ?? (await summarizeSite(url, pages));
     await patchProfileSections(workspaceId, summaryPatches(summary));
     await save({ status: "done", summary, opportunities, finishedAt: new Date().toISOString() });
     await logEvent(workspaceId, "site_read", { pages: pages.length, ms: Date.now() - started });
     await syncMap(workspaceId); // path B's levels follow what the site suggests
-    if (!cached) await cacheSite(url, pages, await branding);
+    if (!cached?.summary) await cacheSite(url, { pages, brand: await branding, summary: { summary, opportunities } });
   } catch (error) {
     console.error(`Failed to read ${url}`, error);
     const current = await getWorkspace(workspaceId);

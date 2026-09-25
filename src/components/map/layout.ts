@@ -8,7 +8,7 @@ import type { RegionId } from "@/lib/catalog/regions";
 export type MapSize = { width: number; height: number };
 
 /** Below this the map scrolls rather than squeezing tasks into home base. */
-export const MIN_SIZE: MapSize = { width: 380, height: 560 };
+export const MIN_SIZE: MapSize = { width: 340, height: 560 };
 
 /** Tasks show as cards when there's room, and as dots otherwise; each needs its own spacing. */
 export type MapMode = "cards" | "dots";

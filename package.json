@@ -13,7 +13,9 @@
     "eval:extract": "node --env-file=.env.local --import tsx evals/extract.eval.mts",
     "check:site": "node --env-file=.env.local --import tsx evals/site.check.mts",
     "check:quick-wins": "node --env-file=.env.local --import tsx evals/quick-wins.check.mts",
-    "check:map": "node --env-file=.env.local --import tsx evals/map.check.mts"
+    "check:map": "node --env-file=.env.local --import tsx evals/map.check.mts",
+    "seed:demo": "node --env-file=.env.local --import tsx scripts/seed-demo.mts",
+    "funnel": "node --env-file=.env.local --import tsx scripts/funnel.mts"
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.114",

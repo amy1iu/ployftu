@@ -8,6 +8,7 @@ import { Composer, type ComposerHandle } from "./chat/composer";
 import { Message } from "./chat/message";
 import { SiteCard } from "./chat/site-card";
 import { ThinkingIndicator } from "./chat/thinking-indicator";
+import { WrapUpCard } from "./chat/wrap-up-card";
 import { useChatColumnClass } from "./map/map-panel-state";
 import { useOnboardingChat, useWorkspace } from "./workspace/workspace-provider";
 
@@ -72,6 +73,7 @@ export function OnboardingChat() {
             ))}
             {!siteCardAfter && siteCard}
             {thinking && <ThinkingIndicator />}
+            {!busy && <WrapUpCard />}
             {error && (
               <p className="px-2 text-[13px] text-red-600">
                 Something went wrong.{" "}

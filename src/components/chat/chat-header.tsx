@@ -10,13 +10,13 @@ import { useClickOutside } from "../use-click-outside";
 export function ChatHeader({ title, actions }: { title: ReactNode; actions?: ReactNode }) {
   const map = useMapPanel();
   return (
-    <header className="flex h-[72px] shrink-0 items-center justify-between pr-[26px] pl-10">
-      <h1 className="text-[17px]">{title}</h1>
+    <header className="flex h-[72px] shrink-0 items-center justify-between gap-3 pr-4 pl-10 sm:pr-[26px]">
+      <h1 className="min-w-0 truncate text-[17px]">{title}</h1>
       <div className="flex items-center gap-2">
         {actions}
         <button
           type="button"
-          className="flex h-8 items-center gap-2 rounded-full border border-border bg-surface pr-3 pl-2 text-[12px] shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
+          className="hidden h-8 items-center gap-2 rounded-full border border-border bg-surface pr-3 pl-2 text-[12px] shadow-[0_1px_2px_rgba(0,0,0,0.04)] sm:flex"
         >
           <span className="flex size-5 items-center justify-center rounded-full bg-avatar text-[11px] text-white">
             {currentUser.initial}
@@ -24,14 +24,14 @@ export function ChatHeader({ title, actions }: { title: ReactNode; actions?: Rea
           Share
         </button>
         {map.available && (
-          <Tooltip label={map.open ? "Hide map" : "Show map"} side="bottom">
+          <Tooltip label={map.visible ? "Hide map" : "Show map"} side="bottom">
             <button
               type="button"
-              aria-label={map.open ? "Hide map" : "Show map"}
+              aria-label="Toggle map"
               onClick={map.toggle}
               className="flex size-8 items-center justify-center rounded-lg text-[#3a3a3a] hover:bg-hover"
             >
-              <PanelRight size={20} strokeWidth={1.5} className={map.open ? "fill-[#3a3a3a]/15" : ""} />
+              <PanelRight size={20} strokeWidth={1.5} className={map.visible ? "fill-[#3a3a3a]/15" : ""} />
             </button>
           </Tooltip>
         )}

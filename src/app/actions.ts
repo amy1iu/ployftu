@@ -9,11 +9,13 @@ import { logEvent } from "@/lib/db/events";
 import {
   connectIntegration as saveIntegration,
   createWorkspace,
+  getPloy,
   openWorkspace,
   setOnboardingStatus,
   updatePloy,
 } from "@/lib/db/workspaces";
 import { runLevel, startLevel } from "@/lib/map/levels";
+import { resetQuickWin, runQuickWin } from "@/lib/quick-wins/run";
 import { replyInPloy } from "@/lib/tasks/reply";
 import { confirmSiteProfile } from "@/lib/site/run";
 
@@ -61,4 +63,20 @@ export async function connectIntegration(workspaceId: string, category: Integrat
   if (!integrationCategoryIds.includes(category) || !name) throw new Error("Pick a capability and a tool");
   await saveIntegration(workspaceId, category, name);
   await logEvent(workspaceId, "integration_connected", { category, tool: name });
+}
+
+/** Turns a recurring Ploybook on (live) or back off. Demo only: nothing actually runs on a schedule. */
+export async function setPloybookLive(ployId: string, live: boolean) {
+  const ploy = await getPloy(ployId);
+  if (!ploy.spec || ploy.spec.trigger === "manual" || (ploy.status !== "done" && ploy.status !== "live"))
+    throw new Error("Only a finished recurring Ploybook can be turned on");
+  await updatePloy(ployId, { status: live ? "live" : "done" });
+  await logEvent(ploy.workspace_id, live ? "ploybook_live" : "ploybook_paused", { specId: ploy.spec.id });
+}
+
+/** Runs a first deliverable again after it failed. */
+export async function retryQuickWin(ployId: string) {
+  await resetQuickWin(ployId);
+  const ploy = await getPloy(ployId);
+  after(() => runQuickWin(ploy.workspace_id, ployId));
 }

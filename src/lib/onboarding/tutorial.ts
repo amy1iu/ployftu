@@ -22,7 +22,7 @@ const tutorialSteps: { id: string; label: string; done: (s: TutorialState) => bo
   },
   {
     id: "level",
-    label: "Start a level on your map",
+    label: "Start a task on your map",
     done: (s) => s.mapNodes.some((n) => n.ploy_id && getSpec(n.spec_id)?.source !== "quick_win"),
   },
 ];

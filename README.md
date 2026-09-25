@@ -9,12 +9,15 @@ A first-time-user experience for Ploy: a Getting Started chat that learns the us
 ```bash
 cp .env.example .env.local   # fill in keys
 npx supabase link && npx supabase db push
+npm run seed:demo   # optional: pin the demo sites so they read instantly
 npm run dev
 ```
 
+Set `DEMO_STEP_MS` in `.env.local` to change how long each scripted task step takes (default 1800ms).
+
 ## Scripts
 
-| Script | What it checks |
+| Script | What it does |
 | --- | --- |
 | `npm test` | Unit tests: catalog integrity, OpenAI strict-mode schemas, entry logic, doc patching |
 | `npm run check:foundation` | Workspace seeding, isolation between runs, Realtime latency |
@@ -23,6 +26,8 @@ npm run dev
 | `npm run check:map` | Answers reveal and emphasize the right regions, levels are personalized, sync is idempotent, levels unlock and run |
 | `npm run eval:extract` | Precision of recording answers from single messages |
 | `npm run eval:entry` | 24 simulated users through the real Getting Started flow, scored against the phase 1 gates |
+| `npm run seed:demo` | Pins the demo sites (intelligentsia.com, linear.app, glossier.com) in the crawl cache with their summaries, so demos skip the crawl |
+| `npm run funnel` | Onboarding funnel across real runs: how many reach each step, timings, paths, and requests Ploy doesn't cover |
 
 Eval results land in `evals/results/`.
 
@@ -31,7 +36,7 @@ Eval results land in `evals/results/`.
 | Path | Purpose |
 | --- | --- |
 | `src/app/(workspace)/` | Routes sharing one persistent frame: `/` Getting Started, `/ploys/[id]`, `/docs/[[...slug]]` |
-| `src/app/actions.ts` | Start fresh, switch workspace, mark onboarding done/skipped |
+| `src/app/actions.ts` | Start fresh, switch workspace, mark onboarding done/skipped, start map tasks, connect tools, turn Ploybooks on/off, retry a failed deliverable |
 | `src/app/api/chat/route.ts` | Getting Started turns |
 | `src/lib/ai/onboarding/` | The Getting Started agent: turn pipeline, prompt, answer extraction, reply chips |
 | `src/lib/catalog/` | Ploy primitives, agent tools, regions, intents, Ploybook templates, quick wins |

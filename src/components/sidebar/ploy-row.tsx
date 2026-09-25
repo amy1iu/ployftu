@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, Ellipsis, Pencil, Trash2 } from "lucide-react";
+import { Archive, Ellipsis, Pencil, Star, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -8,13 +8,21 @@ import type { Ploy } from "@/lib/db/types";
 import { useAnchor } from "../floating";
 import { Tooltip } from "../tooltip";
 
-/** Running → spinner; finished but unopened → green dot; otherwise the hollow "Idle" circle. */
+/** Running → spinner; live → star; finished but unopened → green dot; otherwise the hollow "Idle" circle. */
 export function PloyStatus({ ploy }: { ploy: Ploy }) {
   if (ploy.status === "running")
     return (
       <Tooltip label="Running">
         <span className="flex size-4 items-center justify-center">
           <span className="size-[9px] animate-spin rounded-full border-[1.5px] border-subtle border-t-transparent" />
+        </span>
+      </Tooltip>
+    );
+  if (ploy.status === "live")
+    return (
+      <Tooltip label="Live">
+        <span className="flex size-4 items-center justify-center text-ink">
+          <Star size={11} fill="currentColor" />
         </span>
       </Tooltip>
     );

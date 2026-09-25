@@ -49,3 +49,18 @@ async function doQuickWin(workspaceId: string, ployId: string) {
   await logEvent(workspaceId, "quick_win_done", { recipeId, fallback, ms: Date.now() - started });
   await syncMap(workspaceId); // the fog lifts once the first deliverable is done
 }
+
+/** Puts a failed quick win back to its starting plan so it can run again. */
+export async function resetQuickWin(ployId: string) {
+  const ploy = await getPloy(ployId);
+  if (ploy.spec?.source !== "quick_win" || ploy.status !== "idle") throw new Error("Only a failed quick win can be retried");
+  const messages = (ploy.messages as TaskUIMessage[])
+    .filter((m) => m.id === "kickoff")
+    .map((m) => ({
+      ...m,
+      parts: m.parts.map((p) =>
+        p.type === "data-plan" ? { ...p, data: { steps: p.data.steps.map((s) => ({ ...s, status: "pending" as const })) } } : p,
+      ),
+    }));
+  await updatePloy(ployId, { messages, status: "running" });
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, LoaderCircle, Lock } from "lucide-react";
+import { Check, LoaderCircle, Lock, Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getSpec } from "@/lib/catalog";
 import { agentTools } from "@/lib/catalog/agent-tools";
@@ -47,7 +47,7 @@ function TaskCheck({ state, color }: { state: NodeState["state"]; color: string 
   if (state === "done" || state === "live")
     return (
       <span className="flex size-[18px] shrink-0 items-center justify-center rounded-full bg-ink text-white">
-        <Check size={11} strokeWidth={3.5} />
+        {state === "live" ? <Star size={10} fill="currentColor" /> : <Check size={11} strokeWidth={3.5} />}
       </span>
     );
   return <span className="size-[18px] shrink-0 rounded-full border-2 border-ink/25" style={{ background: color }} />;
@@ -59,14 +59,13 @@ const stepNames = (specId: string) =>
 /** A task on the map, as a card: checkbox, what it does, and how long / what it needs. */
 function TaskCard({ node, state, lockReason, color, selected }: { node: MapNode; state: NodeState["state"]; lockReason: string | null; color: string; selected: boolean }) {
   const spec = getSpec(node.spec_id);
-  const meta =
-    state === "locked"
-      ? lockReason
-      : state === "running"
-        ? "Running…"
-        : state === "done" || state === "live"
-          ? "Done"
-          : `${spec?.estMinutes ?? 3} min · ${stepNames(node.spec_id).slice(0, 2).join(", ")}`;
+  const meta = {
+    locked: lockReason,
+    running: "Running…",
+    live: "Live · runs on its own",
+    done: "Done",
+    available: `${spec?.estMinutes ?? 3} min · ${stepNames(node.spec_id).slice(0, 2).join(", ")}`,
+  }[state];
   const done = state === "done" || state === "live";
   return (
     <span
@@ -242,7 +241,7 @@ export function GrowthMap({ onConnect }: { onConnect: (category: IntegrationCate
         </span>
         {firstWin && <FirstWinBadge node={firstWin} {...nodeProps(firstWin)} />}
         {!mapNodes.length && (
-          <span className="rounded-full bg-ink/5 px-3 py-1 text-[12px] whitespace-nowrap text-muted">← Answer in the chat to reveal tasks</span>
+          <span className="rounded-full bg-ink/5 px-3 py-1 text-[12px] whitespace-nowrap text-muted"><span className="hidden xl:inline">← </span>Answer in the chat to reveal tasks</span>
         )}
       </div>
 

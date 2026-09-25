@@ -20,7 +20,7 @@ export function MapPanel({ onClose }: { onClose?: () => void }) {
         <div className="space-y-1.5">
           <h2 className="font-display text-[28px] leading-none tracking-wide text-ink uppercase">Your growth map</h2>
           <p className="max-w-[440px] text-[13px] leading-snug text-muted">
-            Every card is a task Ploy can do for you. Keep chatting to unlock more, and hover a task to start it.
+            Every card is a task Ploy can do for you. Keep chatting to unlock more, and hover or tap a task to start it.
           </p>
         </div>
         <div className="flex items-start gap-4">

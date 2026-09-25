@@ -7,11 +7,12 @@ import { textOf } from "@/lib/ai/onboarding/text";
 import { ChatHeader } from "./chat/chat-header";
 import { Composer } from "./chat/composer";
 import { Message } from "./chat/message";
+import { TaskActions } from "./chat/task-actions";
 import { ThinkingIndicator } from "./chat/thinking-indicator";
 import { useChatColumnClass } from "./map/map-panel-state";
 import { useWorkspace } from "./workspace/workspace-provider";
 
-const statusLabel = { idle: "Paused", running: "Running", done: "Done", live: "Live" };
+const statusLabel = { idle: "Stopped", running: "Running", done: "Done", live: "Live" };
 
 // A task ploy: reads like a chat. The kickoff, plan, and deliverable are posted
 // by the task runner; the composer gets a short contextual reply.
@@ -68,6 +69,7 @@ export function TaskPloy({ id }: { id: string }) {
           </div>
         </div>
         <div className="mx-auto w-full max-w-[702px] px-4 pb-[26px]">
+          <TaskActions ploy={ploy} />
           <Composer
             disabled={replying}
             placeholder={ploy.status === "running" ? "Ask about this while it runs..." : "Ask about this, or what to change..."}
