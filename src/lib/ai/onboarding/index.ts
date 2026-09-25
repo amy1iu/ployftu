@@ -1,9 +1,11 @@
 import { convertToModelMessages, createUIMessageStream, Output, streamText } from "ai";
 import type { Workspace } from "@/lib/db/types";
-import { getDocs, getPloys, getWorkspace } from "@/lib/db/workspaces";
+import { getDocs, getIntegrations, getMapNodes, getPloys, getWorkspace } from "@/lib/db/workspaces";
+import { nodeState } from "@/lib/map/state";
 import { runQuickWin } from "@/lib/quick-wins/run";
 import { quickWinToStart, startQuickWin } from "@/lib/quick-wins/start";
 import { applyEntryUpdate } from "@/lib/onboarding/set-entry";
+import { syncMap } from "@/lib/map/sync";
 import { readAndProfileSite } from "@/lib/site/run";
 import { models } from "../models";
 import { extractEntryUpdate } from "./extract";
@@ -50,15 +52,28 @@ export async function onboardingTurn({
   workspaceId,
   messages,
   onSaved,
-  readSite = true,
+  sideEffects = true,
 }: {
   workspaceId: string;
   messages: OnboardingUIMessage[];
   onSaved: (messages: OnboardingUIMessage[]) => Promise<void>;
-  /** Off in the entry eval, whose personas have made-up websites. */
-  readSite?: boolean;
+  /** Reading their site and growing the map. Off in the entry eval, whose personas have made-up websites. */
+  sideEffects?: boolean;
 }) {
-  const [workspace, docs, ploys] = await Promise.all([getWorkspace(workspaceId), getDocs(workspaceId), getPloys(workspaceId)]);
+  const [workspace, docs, ploys, mapNodes, integrations] = await Promise.all([
+    getWorkspace(workspaceId),
+    getDocs(workspaceId),
+    getPloys(workspaceId),
+    getMapNodes(workspaceId),
+    getIntegrations(workspaceId),
+  ]);
+  const levelStarted = mapNodes.some((n) => n.ploy_id && ploys.find((p) => p.id === n.ploy_id)?.spec?.source === "template");
+  // Their top startable level (emphasized regions first), until they start one.
+  const nextLevel = levelStarted
+    ? null
+    : (mapNodes
+        .toSorted((a, b) => Number(b.emphasized) - Number(a.emphasized))
+        .find((n) => nodeState(n, { ploys, integrations, mapNodes }).state === "available")?.title ?? null);
   const recording = recordEntryAnswers(workspace, messages);
 
   // Once we know enough, the first deliverable starts in its own task ploy.
@@ -68,7 +83,7 @@ export async function onboardingTurn({
   const quickWin = started ?? ploys.find((p) => p.spec?.source === "quick_win") ?? null;
 
   const background = Promise.all([
-    recording.then((entry) => (readSite ? readSiteIfNew(workspace, entry, messages) : undefined)),
+    recording.then((entry) => (sideEffects ? Promise.all([syncMap(workspaceId), readSiteIfNew(workspace, entry, messages)]) : undefined)),
     recordProfileNotes(workspaceId, messages),
     started && runQuickWin(workspaceId, started.id),
   ]);
@@ -82,6 +97,7 @@ export async function onboardingTurn({
           workspace,
           docs,
           quickWin: quickWin && { name: quickWin.title, state: started ? "starting" : quickWin.status === "done" ? "done" : "running" },
+          nextLevel,
         }),
         messages: await convertToModelMessages(messages),
         providerOptions: models.chatOptions,

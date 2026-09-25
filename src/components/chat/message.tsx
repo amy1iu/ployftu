@@ -2,7 +2,7 @@ import type { UIMessage } from "ai";
 import { ArrowRight, Sparkles } from "lucide-react";
 import Link from "next/link";
 import type { RepliesData, TaskStartedData } from "@/lib/ai/onboarding/messages";
-import type { DeliverableData, PlanData } from "@/lib/quick-wins/types";
+import type { DeliverableData, PlanData } from "@/lib/tasks/types";
 import { DeliverableView } from "../deliverables/deliverable-view";
 import { Markdown } from "../markdown";
 import { PlanCard } from "./plan-card";

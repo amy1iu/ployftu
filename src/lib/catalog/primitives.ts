@@ -1,22 +1,10 @@
 import { z } from "zod";
+import { integrationCategoryIds } from "./integrations";
 
 // Ploy primitives: the product's own building blocks, semi-visible in the UI.
 // None of these run in this project; they're described so agents can plan with
 // them and the UI can show what a Ploybook *would* do. Schemas use .nullable()
 // rather than .optional() so they stay valid for OpenAI strict structured output.
-
-export const integrationProviders = [
-  "gmail",
-  "hubspot",
-  "salesforce",
-  "linkedin",
-  "slack",
-  "shopify",
-  "ga4",
-  "meta_ads",
-  "google_ads",
-] as const;
-export type IntegrationProvider = (typeof integrationProviders)[number];
 
 type Action = { description: string; input: z.ZodType };
 
@@ -125,20 +113,20 @@ export const primitives = {
     description: "Connections to outside tools (email, CRM, social, ad platforms, analytics).",
     actions: {
       connect: {
-        description: "Connect a provider.",
-        input: z.object({ provider: z.enum(integrationProviders) }),
+        description: "Connect a tool that provides a capability (e.g. Attio as the CRM).",
+        input: z.object({ category: z.enum(integrationCategoryIds), tool: z.string() }),
       },
       send_email: {
         description: "Send or schedule email through a connected inbox.",
         input: z.object({ to: z.string(), subject: z.string(), body: markdown }),
       },
       sync_contacts: {
-        description: "Sync contacts with a connected CRM.",
-        input: z.object({ provider: z.enum(integrationProviders), table: z.string() }),
+        description: "Sync contacts with the connected CRM.",
+        input: z.object({ table: z.string() }),
       },
       post: {
         description: "Publish a post to a connected social account.",
-        input: z.object({ provider: z.enum(integrationProviders), text: z.string() }),
+        input: z.object({ account: z.string(), text: z.string() }),
       },
     },
   },

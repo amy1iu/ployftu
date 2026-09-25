@@ -75,7 +75,7 @@ Reply as this person would, answering what the assistant asked. Keep it short (1
 async function runTurn(workspaceId: string, messages: OnboardingUIMessage[]) {
   const started = performance.now();
   let firstText: number | null = null;
-  const { stream } = await onboardingTurn({ workspaceId, messages, onSaved: async () => {}, readSite: false });
+  const { stream } = await onboardingTurn({ workspaceId, messages, onSaved: async () => {}, sideEffects: false });
   const timed = stream.pipeThrough(
     new TransformStream<UIMessageChunk, UIMessageChunk>({
       transform(chunk, controller) {

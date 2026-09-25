@@ -4,7 +4,7 @@ import { entryUpdateSchema } from "@/lib/ai/onboarding/extract";
 import { profileNotesSchema } from "@/lib/ai/onboarding/profile-notes";
 import { replySchema } from "@/lib/ai/onboarding/reply";
 import { siteSummarySchema } from "@/lib/site/summarize";
-import { agentTools, allSpecs, getSpec, intents, primitives, quickWins, regionIds, regions } from ".";
+import { agentTools, allSpecs, getSpec, integrationCategoryIds, intents, primitives, quickWins, regionIds, regions } from ".";
 
 describe("catalog integrity", () => {
   it("has unique spec ids", () => {
@@ -19,6 +19,7 @@ describe("catalog integrity", () => {
       else expect(Object.keys(agentTools)).toContain(step.tool);
     }
     for (const prereq of spec.prereqs) expect(getSpec(prereq), `prereq ${prereq}`).toBeDefined();
+    for (const need of spec.requires) expect(integrationCategoryIds).toContain(need);
   });
 
   it.each(intents.map((i) => [i.id, i] as const))("intent %s points at real regions, templates, and a quick win", (_, intent) => {

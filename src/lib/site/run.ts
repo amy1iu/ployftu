@@ -1,5 +1,6 @@
 import { logEvent } from "@/lib/db/events";
 import { getDocs, getWorkspace, patchProfileSections, updateWorkspace, type SectionPatch } from "@/lib/db/workspaces";
+import { syncMap } from "@/lib/map/sync";
 import { nameFromUrl } from "@/lib/onboarding/entry";
 import { cacheSite, getCachedSite, readBrand, readPages } from "./read";
 import { summarizeSite } from "./summarize";
@@ -96,6 +97,7 @@ export async function readAndProfileSite({
     await patchProfileSections(workspaceId, summaryPatches(summary));
     await save({ status: "done", summary, opportunities, finishedAt: new Date().toISOString() });
     await logEvent(workspaceId, "site_read", { pages: pages.length, ms: Date.now() - started });
+    await syncMap(workspaceId); // path B's levels follow what the site suggests
     if (!cached) await cacheSite(url, pages, await branding);
   } catch (error) {
     console.error(`Failed to read ${url}`, error);

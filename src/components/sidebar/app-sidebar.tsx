@@ -4,8 +4,10 @@ import { Bell, Gift, CircleHelp, Search } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { currentUser, recentSites } from "@/lib/mock-data";
 import { tutorialProgress } from "@/lib/onboarding/tutorial";
+import { Tooltip } from "../tooltip";
 import { useWorkspace } from "../workspace/workspace-provider";
 import { libraryNav, primaryNav } from "./nav-config";
+import { PloyRow, PloyStatus } from "./ploy-row";
 import { SidebarNavItem, SidebarRow, SidebarSection } from "./sidebar-primitives";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 
@@ -17,13 +19,6 @@ function PanelToggleIcon() {
     </svg>
   );
 }
-
-const statusDot = {
-  idle: <span className="mr-2 size-[7px] rounded-full border border-subtle" />,
-  running: <span className="mr-2 size-[9px] animate-spin rounded-full border-[1.5px] border-subtle border-t-transparent" />,
-  done: <span className="mr-2 size-[7px] rounded-full bg-avatar" />,
-  live: <span className="mr-2 size-[7px] rounded-full bg-avatar ring-2 ring-avatar/30" />,
-};
 
 export function AppSidebar({ onToggle }: { onToggle: () => void }) {
   const pathname = usePathname();
@@ -47,7 +42,7 @@ export function AppSidebar({ onToggle }: { onToggle: () => void }) {
 
       <WorkspaceSwitcher />
 
-      <nav className="flex flex-1 flex-col overflow-y-auto">
+      <nav className="flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <div className="mt-2 flex flex-col gap-1.5">
           {primaryNav.map((item) => (
             <SidebarNavItem key={item.id} item={item} tall />
@@ -80,33 +75,35 @@ export function AppSidebar({ onToggle }: { onToggle: () => void }) {
         <SidebarSection label="Your Ploys">
           {/* Getting Started is always pinned first, and styled as special while the tutorial is active. */}
           {onboarding && (
-            <SidebarRow
+            <PloyRow
               href="/"
               active={pathname === "/"}
               className={tutorialActive ? "font-accent text-[17px] text-accent" : ""}
-              trailing={
+              status={
                 tutorialActive ? (
-                  <span className="rounded-full bg-accent-soft px-1.5 font-sans text-[11px] text-accent tabular-nums">
-                    {progress.done}/{progress.total}
-                  </span>
+                  <Tooltip label="Tutorial progress">
+                    <span className="rounded-full bg-accent-soft px-1.5 text-[11px] text-accent tabular-nums">
+                      {progress.done}/{progress.total}
+                    </span>
+                  </Tooltip>
                 ) : (
-                  statusDot.done
+                  <PloyStatus ploy={onboarding} />
                 )
               }
             >
               {onboarding.title}
-            </SidebarRow>
+            </PloyRow>
           )}
           {tasks.map((ploy) => (
-            <SidebarRow
+            <PloyRow
               key={ploy.id}
               href={`/ploys/${ploy.id}`}
               active={pathname === `/ploys/${ploy.id}`}
               className={ploy.unread ? "font-medium" : ""}
-              trailing={statusDot[ploy.status]}
+              status={<PloyStatus ploy={ploy} />}
             >
               {ploy.title}
-            </SidebarRow>
+            </PloyRow>
           ))}
         </SidebarSection>
       </nav>

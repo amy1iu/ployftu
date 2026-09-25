@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { Deliverable } from "@/lib/quick-wins/generate";
-import type { DeliverableData } from "@/lib/quick-wins/types";
+import type { DeliverableData } from "@/lib/tasks/types";
 import { useWorkspace } from "../workspace/workspace-provider";
 
 const card = "rounded-xl border border-border bg-surface p-4";

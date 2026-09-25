@@ -8,6 +8,7 @@ import { Composer, type ComposerHandle } from "./chat/composer";
 import { Message } from "./chat/message";
 import { SiteCard } from "./chat/site-card";
 import { ThinkingIndicator } from "./chat/thinking-indicator";
+import { useChatColumnClass } from "./map/map-panel-state";
 import { useOnboardingChat, useWorkspace } from "./workspace/workspace-provider";
 
 export function OnboardingChat() {
@@ -16,6 +17,7 @@ export function OnboardingChat() {
   const { messages, sendMessage, status, error } = useChat({ chat });
   const busy = status === "submitted" || status === "streaming";
   const bottomRef = useRef<HTMLDivElement>(null);
+  const chatColumn = useChatColumnClass();
   const composer = useRef<ComposerHandle>(null);
   const [, startTransition] = useTransition();
 
@@ -56,42 +58,44 @@ export function OnboardingChat() {
     <div className="flex h-full flex-col">
       <ChatHeader title="Getting Started" actions={<HeaderMenu items={menu} />} />
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[702px] space-y-6 px-4 pt-5 pb-6 text-[14px] leading-[21px]">
-          {messages.map((message) => (
-            <Fragment key={message.id}>
-              <Message
-                message={message}
-                onReply={!busy && message.id === lastAssistant?.id && lastAssistant === messages.at(-1) ? send : undefined}
-              />
-              {message.id === siteCardAfter && siteCard}
-            </Fragment>
-          ))}
-          {!siteCardAfter && siteCard}
-          {thinking && <ThinkingIndicator />}
-          {error && (
-            <p className="px-2 text-[13px] text-red-600">
-              Something went wrong.{" "}
-              <button type="button" className="underline" onClick={() => chat.regenerate()}>
-                Try again
-              </button>
-            </p>
-          )}
-          <div ref={bottomRef} />
+      <div className={`flex min-h-0 flex-1 flex-col ${chatColumn}`}>
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[702px] space-y-6 px-4 pt-5 pb-6 text-[14px] leading-[21px]">
+            {messages.map((message) => (
+              <Fragment key={message.id}>
+                <Message
+                  message={message}
+                  onReply={!busy && message.id === lastAssistant?.id && lastAssistant === messages.at(-1) ? send : undefined}
+                />
+                {message.id === siteCardAfter && siteCard}
+              </Fragment>
+            ))}
+            {!siteCardAfter && siteCard}
+            {thinking && <ThinkingIndicator />}
+            {error && (
+              <p className="px-2 text-[13px] text-red-600">
+                Something went wrong.{" "}
+                <button type="button" className="underline" onClick={() => chat.regenerate()}>
+                  Try again
+                </button>
+              </p>
+            )}
+            <div ref={bottomRef} />
+          </div>
         </div>
-      </div>
 
-      <div className="mx-auto w-full max-w-[702px] px-4 pb-[26px]">
-        <Composer
-          ref={composer}
-          disabled={busy}
-          onSend={send}
-          placeholder={
-            workspace.entry.website.status === "unknown"
-              ? "Paste your URL or describe your business"
-              : "Type your message..."
-          }
-        />
+        <div className="mx-auto w-full max-w-[702px] px-4 pb-[26px]">
+          <Composer
+            ref={composer}
+            disabled={busy}
+            onSend={send}
+            placeholder={
+              workspace.entry.website.status === "unknown"
+                ? "Paste your URL or describe your business"
+                : "Type your message..."
+            }
+          />
+        </div>
       </div>
     </div>
   );

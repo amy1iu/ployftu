@@ -1,11 +1,14 @@
 "use client";
 
-import { Ellipsis } from "lucide-react";
+import { Ellipsis, PanelRight } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { currentUser } from "@/lib/mock-data";
+import { useMapPanel } from "../map/map-panel-state";
+import { Tooltip } from "../tooltip";
 import { useClickOutside } from "../use-click-outside";
 
 export function ChatHeader({ title, actions }: { title: ReactNode; actions?: ReactNode }) {
+  const map = useMapPanel();
   return (
     <header className="flex h-[72px] shrink-0 items-center justify-between pr-[26px] pl-10">
       <h1 className="text-[17px]">{title}</h1>
@@ -20,6 +23,18 @@ export function ChatHeader({ title, actions }: { title: ReactNode; actions?: Rea
           </span>
           Share
         </button>
+        {map.available && (
+          <Tooltip label={map.open ? "Hide map" : "Show map"} side="bottom">
+            <button
+              type="button"
+              aria-label={map.open ? "Hide map" : "Show map"}
+              onClick={map.toggle}
+              className="flex size-8 items-center justify-center rounded-lg text-[#3a3a3a] hover:bg-hover"
+            >
+              <PanelRight size={20} strokeWidth={1.5} className={map.open ? "fill-[#3a3a3a]/15" : ""} />
+            </button>
+          </Tooltip>
+        )}
       </div>
     </header>
   );

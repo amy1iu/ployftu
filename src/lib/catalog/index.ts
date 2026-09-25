@@ -6,6 +6,7 @@ import { quickWins } from "./quick-wins";
 import { regions } from "./regions";
 
 export * from "./agent-tools";
+export * from "./integrations";
 export * from "./intents";
 export * from "./ploybooks";
 export * from "./primitives";

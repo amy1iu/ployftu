@@ -1,5 +1,6 @@
 import type { AgentToolId } from "./agent-tools";
-import type { IntegrationProvider, PrimitiveId } from "./primitives";
+import type { IntegrationCategory } from "./integrations";
+import type { PrimitiveId } from "./primitives";
 import type { RegionId } from "./regions";
 
 // One shape for every unit of work: map-node templates, quick wins, and
@@ -15,7 +16,8 @@ export type PloybookSpec = {
   region: RegionId;
   trigger: "manual" | "schedule" | "event";
   steps: Step[];
-  requires: IntegrationProvider[];
+  /** Capabilities that must be connected first (any tool that provides them). */
+  requires: IntegrationCategory[];
   prereqs: string[];
   estMinutes: number;
   source: "template" | "quick_win" | "composed";
@@ -125,7 +127,7 @@ export const templates: PloybookSpec[] = [
       p("ploydb", "query", "Watch for new leads"),
       p("integrations", "sync_contacts", "Push them to your CRM"),
     ],
-    requires: ["hubspot"],
+    requires: ["crm"],
     prereqs: ["lead_list"],
     estMinutes: 3,
   }),
@@ -143,7 +145,7 @@ export const templates: PloybookSpec[] = [
       p("ploybooks", "create_ploybook", "Schedule a 3-step sequence"),
       p("integrations", "send_email", "Send from your inbox"),
     ],
-    requires: ["gmail"],
+    requires: ["email"],
     prereqs: ["lead_list"],
     estMinutes: 5,
   }),
@@ -157,7 +159,7 @@ export const templates: PloybookSpec[] = [
       p("ploybooks", "create_ploybook", "Trigger on every new lead"),
       p("integrations", "send_email", "Send a timed follow-up series"),
     ],
-    requires: ["gmail"],
+    requires: ["email"],
     estMinutes: 4,
   }),
   template({
@@ -172,7 +174,7 @@ export const templates: PloybookSpec[] = [
       p("ploybooks", "create_ploybook", "Schedule weekly publishing"),
       p("integrations", "post", "Post to LinkedIn"),
     ],
-    requires: ["linkedin"],
+    requires: ["social"],
     estMinutes: 4,
   }),
   template({
@@ -199,7 +201,7 @@ export const templates: PloybookSpec[] = [
       p("ads", "generate_creative", "Write ad variants"),
       p("ads", "create_campaign", "Launch with a daily budget"),
     ],
-    requires: ["google_ads"],
+    requires: ["search_ads"],
     estMinutes: 5,
   }),
   template({
@@ -212,7 +214,7 @@ export const templates: PloybookSpec[] = [
       p("ads", "generate_creative", "Write reminder ads"),
       p("ads", "create_campaign", "Launch the campaign"),
     ],
-    requires: ["meta_ads"],
+    requires: ["social_ads"],
     estMinutes: 4,
   }),
 
@@ -226,7 +228,7 @@ export const templates: PloybookSpec[] = [
       p("analytics", "track", "Track visits and sign-ups"),
       p("analytics", "create_dashboard", "Build a conversion dashboard"),
     ],
-    requires: ["ga4"],
+    requires: ["analytics"],
     estMinutes: 3,
   }),
   template({
@@ -240,7 +242,7 @@ export const templates: PloybookSpec[] = [
       p("ploybooks", "create_ploybook", "Schedule it for Mondays"),
       p("integrations", "send_email", "Email it to you"),
     ],
-    requires: ["ga4", "gmail"],
+    requires: ["analytics", "email"],
     estMinutes: 3,
   }),
   template({
@@ -253,7 +255,7 @@ export const templates: PloybookSpec[] = [
       p("integrations", "sync_contacts", "Match leads to customers in your CRM"),
       p("analytics", "create_dashboard", "Build an attribution view"),
     ],
-    requires: ["ga4", "hubspot"],
+    requires: ["analytics", "crm"],
     estMinutes: 4,
   }),
 ];

@@ -84,14 +84,23 @@ function describeQuickWin(quickWin: QuickWinState | null) {
   }[quickWin.state];
 }
 
+/** Once the first deliverable is done, nudge them to start a level (tutorial step 3). */
+function describeMap(quickWin: QuickWinState | null, nextLevel: string | null) {
+  if (quickWin?.state !== "done" || !nextLevel) return "";
+  return `- Growth map: the panel on the right now shows tasks worth doing next. If they haven't started one, suggest the top one ("${nextLevel}") once, and tell them to hover it on the map to start it.`;
+}
+
 export function buildSystemPrompt({
   workspace,
   docs,
   quickWin = null,
+  nextLevel = null,
 }: {
   workspace: Workspace;
   docs: Doc[];
   quickWin?: QuickWinState | null;
+  /** The top level they could start on the map, if they haven't started any. */
+  nextLevel?: string | null;
 }) {
   return `You are Ploy's onboarding guide. Ploy is a marketing platform: it builds on-brand sites and content, and runs growth automations (Ploybooks) made of building blocks called primitives. In the user's first few minutes, you learn their business and show them what Ploy can do for them.
 
@@ -112,6 +121,7 @@ What's recorded so far:
 ${describeEntry(workspace.entry)}
 ${describeSite(workspace.crawl)}
 ${describeQuickWin(quickWin)}
+${describeMap(quickWin, nextLevel)}
 ${entryFlow(workspace.entry, workspace.crawl, docs.find((d) => d.slug === "business-overview")?.sections["what-we-do"]?.status !== "empty")}
 
 # What Ploy can do

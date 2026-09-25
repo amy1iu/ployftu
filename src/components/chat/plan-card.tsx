@@ -1,5 +1,5 @@
 import { Check, Circle, LoaderCircle } from "lucide-react";
-import type { PlanData } from "@/lib/quick-wins/types";
+import type { PlanData } from "@/lib/tasks/types";
 
 /** A Ploybook's steps ticking through. Ploy primitives are solid chips; the agent's own research tools are outlined. */
 export function PlanCard({ steps }: PlanData) {

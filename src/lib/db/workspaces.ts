@@ -4,7 +4,7 @@ import { emptyProfileDocs, getProfileSection, type ProfileDocSlug, type SectionM
 import { greetingMessage } from "@/lib/onboarding/greeting";
 import { db } from "@/lib/supabase/admin";
 import { logEvent } from "./events";
-import type { Doc, OnboardingStatus, Ploy, Workspace, WorkspaceSnapshot } from "./types";
+import type { Doc, Integration, MapNode, OnboardingStatus, Ploy, Workspace, WorkspaceSnapshot } from "./types";
 
 /** Unwraps a query that returns rows. */
 function must<T>({ data, error }: { data: T | null; error: unknown }, what: string): T {
@@ -199,5 +199,42 @@ export async function saveDeliverableDoc(workspaceId: string, slug: string, titl
         { onConflict: "workspace_id,slug" },
       ),
     "save deliverable doc",
+  );
+}
+
+export async function getMapNodes(workspaceId: string) {
+  return must(await db().from("map_nodes").select().eq("workspace_id", workspaceId).returns<MapNode[]>(), "get map nodes");
+}
+
+export async function getMapNode(id: string) {
+  return must(await db().from("map_nodes").select().eq("id", id).single<MapNode>(), "get map node");
+}
+
+/** Adds levels to the map; a level that's already there (same spec) is left alone. */
+export async function insertMapNodes(nodes: Omit<MapNode, "id" | "revealed_at">[]) {
+  if (!nodes.length) return;
+  check(
+    await db().from("map_nodes").upsert(nodes, { onConflict: "workspace_id,spec_id", ignoreDuplicates: true }),
+    "insert map nodes",
+  );
+}
+
+export async function linkNodePloy(nodeId: string, ployId: string) {
+  check(await db().from("map_nodes").update({ ploy_id: ployId }).eq("id", nodeId), "link map node");
+}
+
+export async function getIntegrations(workspaceId: string) {
+  return must(
+    await db().from("integrations").select().eq("workspace_id", workspaceId).returns<Integration[]>(),
+    "get integrations",
+  );
+}
+
+export async function connectIntegration(workspaceId: string, category: string, provider: string) {
+  check(
+    await db()
+      .from("integrations")
+      .upsert({ workspace_id: workspaceId, provider, category }, { onConflict: "workspace_id,provider" }),
+    "connect integration",
   );
 }

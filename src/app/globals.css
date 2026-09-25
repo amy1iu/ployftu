@@ -11,6 +11,7 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-accent: var(--font-instrument-serif);
+  --font-display: var(--font-anton);
 
   /* Ploy palette, sampled from the reference UI */
   --color-sidebar: #f7f7f7;
@@ -23,9 +24,37 @@
   --color-subtle: #858585;
   --color-avatar: #679f38;
 
+  /* Ploy brand colors (ploy.ai): ink and pastel panels */
+  --color-ink: #212121;
+  --color-canvas: #f4f4f4;
+  --color-ploy-pink: #ffb8fc;
+  --color-ploy-lime: #d1f864;
+  --color-ploy-yellow: #fffa64;
+  --color-ploy-blue: #c7d7f9;
+
   /* Onboarding accent: marks Getting Started while the tutorial is active */
   --color-accent: #4f46e5;
   --color-accent-soft: #eef0ff;
+}
+
+@keyframes level-pop {
+  from {
+    opacity: 0;
+    scale: 0.4;
+  }
+  70% {
+    scale: 1.12;
+  }
+}
+
+@keyframes level-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 0%, transparent);
+  }
 }
 
 @keyframes toast-in {

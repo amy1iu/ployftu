@@ -65,7 +65,8 @@ export type MapNode = {
   revealed_at: string;
 };
 
-export type Integration = { workspace_id: string; provider: string; connected_at: string };
+/** A connected tool (`provider`, e.g. "Attio") and the capability it provides (`category`, e.g. "crm"). */
+export type Integration = { workspace_id: string; provider: string; category: string; connected_at: string };
 
 export type WorkspaceSummary = Pick<Workspace, "id" | "name" | "created_at" | "onboarding_status">;
 

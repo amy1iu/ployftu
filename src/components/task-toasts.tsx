@@ -9,7 +9,8 @@ import { useWorkspace } from "./workspace/workspace-provider";
 type Toast = { ployId: string; title: string };
 
 /**
- * Announces finished tasks at the side of the screen instead of in the chat.
+ * Announces finished tasks at the side of the screen (top right, under the
+ * header) instead of in the chat.
  * Only tasks that finish while the app is open; each stays until viewed or
  * dismissed (it's a reward, so it doesn't vanish on its own).
  */
@@ -36,7 +37,7 @@ export function TaskToasts() {
 
   if (!visible.length) return null;
   return (
-    <div className="pointer-events-none fixed right-5 bottom-5 z-40 flex w-80 flex-col gap-2">
+    <div className="pointer-events-none fixed top-[84px] right-8 z-40 flex w-80 flex-col gap-2">
       {visible.map((toast) => (
         <div
           key={toast.ployId}

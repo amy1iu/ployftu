@@ -2,7 +2,7 @@ import { generateText } from "ai";
 import { models } from "@/lib/ai/models";
 import { textOf } from "@/lib/ai/onboarding/text";
 import { getDocs, getPloy, updatePloy } from "@/lib/db/workspaces";
-import type { TaskUIMessage } from "./types";
+import type { TaskUIMessage } from "@/lib/tasks/types";
 
 /**
  * Makes a task ploy chattable: a single reply that knows the task, its
