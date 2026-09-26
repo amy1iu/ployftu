@@ -56,17 +56,21 @@ export async function writeMessage(
     open = true;
     writer.write({ type: "text-delta", id: TEXT_ID, delta });
   };
-  for await (const partial of result.partialOutputStream) {
-    // Fields arrive in order: once the card starts (or is null), the message is final.
-    if (done) continue;
-    if (partial.next === undefined) write(message.push(partial.message ?? ""));
-    else {
-      write(message.push(partial.message ?? "", true));
-      done = true;
+  try {
+    for await (const partial of result.partialOutputStream) {
+      // Fields arrive in order: once the card starts (or is null), the message is final.
+      if (done) continue;
+      if (partial.next === undefined) write(message.push(partial.message ?? ""));
+      else {
+        write(message.push(partial.message ?? "", true));
+        done = true;
+      }
     }
+    const turn = await result.output;
+    if (!done) write(message.push(turn.message, true));
+    return turn;
+  } finally {
+    // Closed even when the model fails partway, so the chat never holds an open text part.
+    if (open) writer.write({ type: "text-end", id: TEXT_ID });
   }
-  const turn = await result.output;
-  if (!done) write(message.push(turn.message, true));
-  if (open) writer.write({ type: "text-end", id: TEXT_ID });
-  return turn;
 }

@@ -4,6 +4,7 @@ import { Chat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { createContext, useContext, useEffect, useReducer, useState, type ReactNode } from "react";
 import type { OnboardingUIMessage } from "@/lib/ai/onboarding/messages";
+import { upgradeTrail } from "@/lib/onboarding/legacy";
 import type { WorkspaceSnapshot } from "@/lib/db/types";
 import { createClient } from "@/lib/supabase/client";
 
@@ -67,7 +68,7 @@ export function WorkspaceProvider({ initial, children }: { initial: WorkspaceSna
     const ploy = initial.ploys.find((p) => p.kind === "onboarding")!;
     return new Chat<OnboardingUIMessage>({
       id: ploy.id,
-      messages: ploy.messages as OnboardingUIMessage[],
+      messages: upgradeTrail(ploy.messages as OnboardingUIMessage[]),
       transport: new DefaultChatTransport({ api: "/api/chat", body: { workspaceId } }),
     });
   });

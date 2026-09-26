@@ -165,8 +165,7 @@ export function nextQuestion(state: TrailState): QuestionData | "plan" | null {
   return "plan";
 }
 
-/** Where an item stands, for the planner. */
-/** `waiting`: the quick win, before any would be specific to them. */
+/** Where an item stands, for the planner. `waiting`: the quick win, before any would be specific to them. */
 export type ItemStatus = "known" | "answered" | "inferred" | "reading" | "missing" | "unavailable" | "waiting";
 
 export function itemStatus(id: ContextItemId, state: TrailState): ItemStatus {
@@ -273,6 +272,47 @@ export function toQuestion(planned: PlannedCard | null, state: TrailState): Ques
     alt,
     offScript: false,
   };
+}
+
+/**
+ * A card from code alone, for a turn whose planner failed or timed out: the
+ * first open item in the trail's usual order (what they sell with no site to
+ * read, their goal with any ready quick win beside it, who they want to reach,
+ * then a quick win), in plain wording. Null when there's nothing left to ask.
+ */
+export function fallbackCard(state: TrailState): QuestionData | null {
+  if (nextQuestion(state) !== "plan") return null;
+  const open = (id: ContextItemId) => itemStatus(id, state) === "missing";
+  const card = (slot: ContextItemId, question: string, hint: string | null, chips: Chip[]): QuestionData => ({
+    slot,
+    question,
+    hint,
+    chips,
+    category: null,
+    alt: null,
+    offScript: false,
+  });
+  const offer = { question: "Want something useful in the next few minutes?", hint: "Pick one and I'll start right away.", chips: quickWinChips(state) };
+  if (open("business_model")) return card("business_model", "In a sentence, what does your business sell?", null, []);
+  if (open("goal_detail")) {
+    const goal = card("goal_detail", "What do you most want to grow in the next few months?", "Decides which tasks fill your map.", goalChips(state.workspace));
+    return open("quick_win_offer") ? { ...goal, alt: { slot: "quick_win_offer", ...offer } } : goal;
+  }
+  if (open("target_customer")) {
+    const intent = state.workspace.entry.goals.intents[0]?.id;
+    return card("target_customer", intent ? getIntent(intent).audienceQuestion : "Who are your best customers?", "So everything Ploy makes speaks to them.", [notSure]);
+  }
+  if (open("quick_win_offer")) return card("quick_win_offer", offer.question, offer.hint, offer.chips);
+  return null;
+}
+
+/**
+ * The conversation without a turn that failed: from its user message on
+ * (with any partial reply), so the card they answered is back on screen.
+ */
+export function withoutFailedTurn<M extends UIMessage>(messages: M[]): M[] {
+  const i = messages.findLastIndex((m) => m.role === "user");
+  return i === -1 ? messages : messages.slice(0, i);
 }
 
 type Parts = UIMessage["parts"];

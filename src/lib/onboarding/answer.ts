@@ -132,6 +132,8 @@ export async function applyAnswer({
   // The fork has two cards; the quick win is the second.
   const slot: AnsweredSlot = asked.alt && meta.slot === asked.alt.slot ? asked.alt.slot : asked.slot;
   const card = slot === asked.alt?.slot ? asked.alt : asked;
+  // A card the registry doesn't know (a conversation saved by another version): nothing to record it to.
+  if (!(slot in contextItems)) return { slot: null, summary: null, offScript: null, quickWin: null, problems: [] };
 
   const chip = meta.value !== undefined ? card.chips.find((c) => c.value === meta.value) : undefined;
   // A bare URL for the website needs no model to read.

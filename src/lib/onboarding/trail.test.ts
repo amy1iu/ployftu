@@ -5,6 +5,7 @@ import type { Integration, Ploy, Workspace } from "@/lib/db/types";
 import { confirmedProfile, profileWith } from "@/test/fixtures";
 import { emptyEntry, type Entry } from "./entry";
 import {
+  fallbackCard,
   itemStatus,
   MAX_ANSWERED,
   nextQuestion,
@@ -14,6 +15,7 @@ import {
   quickWinNeeds,
   toQuestion,
   websiteQuestion,
+  withoutFailedTurn,
   type AnsweredSlot,
   type PlannedCard,
   type QuestionData,
@@ -270,5 +272,40 @@ describe("quick win readiness", () => {
 
   it("needs a site it could read for the homepage audit", () => {
     expect(quickWinNeeds("homepage_audit", state({ workspace: workspace({ website: site }, { status: "failed" }) }))).toEqual(["website"]);
+  });
+});
+
+describe("fallbackCard (the planner failed)", () => {
+  const noSite = workspace({ website: { status: "none", url: null } });
+
+  it("asks what they sell first when there's no site to read", () => {
+    expect(fallbackCard(state({ workspace: noSite }))).toMatchObject({ slot: "business_model", chips: [] });
+  });
+
+  it("then their goal, with ready quick wins beside it", () => {
+    const q = fallbackCard(state({ workspace: noSite, docs: profileWith("offering") }));
+    expect(q?.slot).toBe("goal_detail");
+    expect(q?.alt?.chips.map((c) => c.value)).toEqual(["landing_page_draft", "social_posts"]);
+  });
+
+  it("then who they want to reach, asked for their goal", () => {
+    const q = fallbackCard(state({ workspace: workspace({ website: site, goals: outbound }) }));
+    expect(q).toMatchObject({ slot: "target_customer", question: "Who do you most want to reach out to?" });
+  });
+
+  it("has nothing to ask once the trail has what it needs, or before the website", () => {
+    const done = state({ workspace: workspace({ website: site, goals: outbound }), docs: confirmedProfile("audience"), ploys: [quickWin] });
+    expect(fallbackCard(done)).toBeNull();
+    expect(fallbackCard(state({}))).toBeNull();
+  });
+});
+
+describe("withoutFailedTurn", () => {
+  const msg = (id: string, role: "user" | "assistant") => ({ id, role, parts: [] }) as UIMessage;
+
+  it("drops the failed answer and any partial reply, so the card is back", () => {
+    const messages = [msg("card", "assistant"), msg("tap", "user"), msg("partial", "assistant")];
+    expect(withoutFailedTurn(messages).map((m) => m.id)).toEqual(["card"]);
+    expect(withoutFailedTurn([msg("card", "assistant")]).map((m) => m.id)).toEqual(["card"]);
   });
 });

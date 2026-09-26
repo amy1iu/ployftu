@@ -6,9 +6,11 @@ import { syncMap } from "@/lib/map/sync";
 import { runQuickWin } from "@/lib/quick-wins/run";
 import { quickWinToStart, startQuickWin } from "@/lib/quick-wins/start";
 import { applyAnswer, type AppliedAnswer } from "@/lib/onboarding/answer";
+import { upgradeTrail } from "@/lib/onboarding/legacy";
 import {
   answeredSlots,
   canRedo,
+  fallbackCard,
   nextQuestion,
   openQuestion,
   questionFor,
@@ -22,7 +24,10 @@ import { models } from "../models";
 import type { OnboardingUIMessage } from "./messages";
 import { recordProfileNotes } from "./profile-notes";
 import { buildTrailPrompt } from "./prompt";
-import { turnSchema, writeMessage } from "./reply";
+import { turnSchema, writeMessage, type Turn } from "./reply";
+
+/** Past this the planner is abandoned and code puts up the card (p95 is ~3s). PLANNER_TIMEOUT_MS overrides it. */
+const plannerTimeoutMs = () => Number(process.env.PLANNER_TIMEOUT_MS ?? 8000);
 
 export type { OnboardingUIMessage } from "./messages";
 
@@ -56,7 +61,7 @@ const loadState = (workspaceId: string) =>
  */
 export async function onboardingTurn({
   workspaceId,
-  messages,
+  messages: saved,
   onSaved,
   sideEffects = true,
 }: {
@@ -66,6 +71,8 @@ export async function onboardingTurn({
   /** Reading their site and growing the map. Off in the entry eval, whose personas have made-up websites. */
   sideEffects?: boolean;
 }) {
+  // Conversations saved by an earlier version name their cards differently.
+  const messages = upgradeTrail(saved);
   const latest = messages.at(-1)?.role === "user" ? messages.at(-1)! : null;
   // Usually the card on screen; or, when they change an earlier answer, the question that asked for it.
   const meta = (latest?.metadata ?? {}) as TrailMetadata;
@@ -73,8 +80,16 @@ export async function onboardingTurn({
   const userTurns = messages.filter((m) => m.role === "user").length;
 
   const before = await getWorkspace(workspaceId);
+  // An answer that fails to record (the extractor or the database) isn't the end
+  // of the turn: it counts as not answered, and the card comes back.
   const answer: AppliedAnswer | null =
-    latest && asked ? await applyAnswer({ workspace: before, asked, message: latest, messages, userTurns }) : null;
+    latest && asked
+      ? await applyAnswer({ workspace: before, asked, message: latest, messages, userTurns }).catch(async (error) => {
+          console.error("Failed to record an answer", error);
+          await logEvent(workspaceId, "turn_error", { stage: "answer", slot: asked.slot, error: String(error).slice(0, 200) });
+          return { slot: null, summary: null, offScript: null, quickWin: null, problems: ["It didn't save on our side."] };
+        })
+      : null;
 
   // Read what the answer changed.
   const [workspace, docs, ploys, mapNodes, integrations] = await loadState(workspaceId);
@@ -87,7 +102,14 @@ export async function onboardingTurn({
   const running = ploys.some((p) => p.spec?.source === "quick_win");
   const picked = !running && answer?.quickWin && quickWinReady(answer.quickWin, { workspace, docs }) ? answer.quickWin : null;
   const recipe = picked || quickWinToStart({ workspace, docs, ploys, answered });
-  const started = recipe ? await startQuickWin(workspace, recipe, { picked: !!picked }) : null;
+  // One that fails to start is skipped this turn; the next turn tries again.
+  const started = recipe
+    ? await startQuickWin(workspace, recipe, { picked: !!picked }).catch(async (error) => {
+        console.error("Failed to start a quick win", error);
+        await logEvent(workspaceId, "turn_error", { stage: "quick_win", recipe, error: String(error).slice(0, 200) });
+        return null;
+      })
+    : null;
   const state: TrailState = { workspace, docs, ploys: started ? [...ploys, started] : ploys, mapNodes, integrations, answered };
   const next = nextQuestion(state);
 
@@ -116,21 +138,37 @@ export async function onboardingTurn({
         writer.write({ type: "data-answered", data: { slot: answer.slot, summary: answer.summary } });
       if (started) writer.write({ type: "data-taskStarted", data: { ployId: started.id, title: started.title } });
 
-      const turn =
-        planning || needsReply
-          ? await writeMessage(
-              writer,
-              streamText({
-                model: models.planner,
-                system: buildTrailPrompt({ state, docs, messages, said, planning }),
-                messages: [{ role: "user", content: latest ? `The user's latest message: "${latestText(latest)}"` : "Begin." }],
-                providerOptions: models.plannerOptions,
-                output: Output.object({ schema: turnSchema }),
-              }),
-            )
-          : null;
+      let turn: Turn | null = null;
+      let plannerFailed = false;
+      if (planning || needsReply) {
+        try {
+          turn = await writeMessage(
+            writer,
+            streamText({
+              model: models.planner,
+              system: buildTrailPrompt({ state, docs, messages, said, planning }),
+              messages: [{ role: "user", content: latest ? `The user's latest message: "${latestText(latest)}"` : "Begin." }],
+              providerOptions: models.plannerOptions,
+              output: Output.object({ schema: turnSchema }),
+              abortSignal: AbortSignal.timeout(plannerTimeoutMs()),
+            }),
+          );
+        } catch (error) {
+          // The planner failed or ran past its time: code puts up the card instead.
+          plannerFailed = true;
+          console.error("Planner failed", error);
+          await logEvent(workspaceId, "turn_error", { stage: "planner", error: String(error).slice(0, 200) });
+        }
+      }
 
-      const question = planning ? toQuestion(turn?.next ?? null, state) : next;
+      // Without the planner: the same card again if this answer didn't land, else the next open item.
+      const fallback = plannerFailed ? (asked && !answer?.slot ? asked : fallbackCard(state)) : null;
+      if (plannerFailed && said && !said.answered) {
+        writer.write({ type: "text-start", id: "fallback" });
+        writer.write({ type: "text-delta", id: "fallback", delta: "Sorry, that didn't go through. Could you answer again?" });
+        writer.write({ type: "text-end", id: "fallback" });
+      }
+      const question = plannerFailed ? (planning ? fallback : next) : planning ? toQuestion(turn?.next ?? null, state) : next;
       // A card code couldn't serve (e.g. a second quick win) finishes the trail instead; count how often.
       if (planning && turn?.next && !question) {
         console.warn(`Planner card dropped: ${turn.next.item}`);
