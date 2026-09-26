@@ -32,9 +32,20 @@
   --color-ploy-yellow: #fffa64;
   --color-ploy-blue: #c7d7f9;
 
-  /* Onboarding accent: marks Getting Started while the tutorial is active */
+  /* Region tints for the Getting Started trail: the Ploy palette, softened */
+  --color-region-site: #fdeff5;
+  --color-region-site-dot: #ec8fb8;
+  --color-region-leads: #edf3ff;
+  --color-region-leads-dot: #7fa6ee;
+  --color-region-campaigns: #f3f8e1;
+  --color-region-campaigns-dot: #a8cc4a;
+  --color-region-measure: #fff8dc;
+  --color-region-measure-dot: #e8c23c;
+
+  /* Accent: links, plan steps, and highlights in task ploys */
   --color-accent: #4f46e5;
   --color-accent-soft: #eef0ff;
+
 }
 
 @keyframes level-pop {
@@ -44,16 +55,6 @@
   }
   70% {
     scale: 1.12;
-  }
-}
-
-@keyframes level-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 35%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 0%, transparent);
   }
 }
 

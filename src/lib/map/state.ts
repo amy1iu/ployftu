@@ -1,8 +1,10 @@
 import { getIntent } from "@/lib/catalog/intents";
 import { getSpec } from "@/lib/catalog";
+import { contextKeys, type ContextKey } from "@/lib/catalog/context";
 import { integrationCategories, type IntegrationCategory } from "@/lib/catalog/integrations";
 import { regionIds, type RegionId } from "@/lib/catalog/regions";
-import type { Integration, MapNode, Ploy, Workspace } from "@/lib/db/types";
+import type { Doc, Integration, MapNode, Ploy, Workspace } from "@/lib/db/types";
+import { hasContext } from "@/lib/docs/profile";
 import { entryBranch } from "@/lib/onboarding/entry";
 
 // The growth map's rules, shared by the server (which nodes exist) and the
@@ -20,7 +22,7 @@ const EMPHASIS = 0.7;
 
 /**
  * Which regions show, and which are emphasized. Every entry answer lifts some
- * fog; finishing the first deliverable lifts the rest.
+ * fog; finishing the first deliverable (once the goal is known) lifts the rest.
  */
 export function mapFocus(workspace: Workspace, ploys: Ploy[]): MapFocus {
   const { entry, crawl } = workspace;
@@ -46,9 +48,12 @@ export function mapFocus(workspace: Workspace, ploys: Ploy[]): MapFocus {
     weigh("leads_data", EMPHASIS);
   }
 
+  // The rest of the fog lifts once the first deliverable is done and they've
+  // given a goal, so answering the goal question still fills the map.
   const quickWinDone = ploys.some((p) => p.spec?.source === "quick_win" && p.status === "done");
   const emphasized = regionIds.filter((r) => (weights.get(r) ?? 0) >= EMPHASIS);
-  const revealed = quickWinDone ? [...regionIds] : regionIds.filter((r) => weights.has(r));
+  const revealed =
+    quickWinDone && entry.goals.status !== "unknown" ? [...regionIds] : regionIds.filter((r) => weights.has(r));
   return { revealed, emphasized };
 }
 
@@ -65,22 +70,39 @@ export type NodeState = {
   lockReason: string | null;
   /** Capabilities to connect (any tool that provides them) before it can start. */
   missing: IntegrationCategory[];
+  /** Business context it's waiting on (e.g. who they sell to); an answer on the trail unlocks it. */
+  missingContext: ContextKey[];
 };
 
 export function nodeState(
   node: MapNode,
-  { ploys, integrations, mapNodes }: { ploys: Ploy[]; integrations: Integration[]; mapNodes: MapNode[] },
+  {
+    ploys,
+    integrations,
+    mapNodes,
+    docs,
+  }: { ploys: Ploy[]; integrations: Integration[]; mapNodes: MapNode[]; docs: Pick<Doc, "slug" | "sections">[] },
 ): NodeState {
   const ploy = node.ploy_id ? ploys.find((p) => p.id === node.ploy_id) : undefined;
-  if (ploy && ploy.status !== "idle") return { state: ploy.status, lockReason: null, missing: [] };
+  if (ploy && ploy.status !== "idle") return { state: ploy.status, lockReason: null, missing: [], missingContext: [] };
 
   const spec = getSpec(node.spec_id);
+  const missingContext = (spec?.needsContext ?? []).filter((key) => !hasContext(docs, key));
+  if (missingContext.length)
+    return {
+      state: "locked",
+      lockReason: `Needs ${missingContext.map((k) => contextKeys[k].need).join(" and ")}`,
+      missing: [],
+      missingContext,
+    };
+
   const missing = (spec?.requires ?? []).filter((c) => !integrations.some((i) => i.category === c));
   if (missing.length)
     return {
       state: "locked",
       lockReason: `Connect ${missing.map((c) => integrationCategories[c].need).join(" and ")}`,
       missing,
+      missingContext: [],
     };
 
   const unfinished = (spec?.prereqs ?? []).find((prereq) => {
@@ -88,7 +110,8 @@ export function nodeState(
     const prereqPloy = prereqNode?.ploy_id ? ploys.find((p) => p.id === prereqNode.ploy_id) : undefined;
     return !prereqPloy || (prereqPloy.status !== "done" && prereqPloy.status !== "live");
   });
-  if (unfinished) return { state: "locked", lockReason: `Finish "${getSpec(unfinished)?.name}" first`, missing: [] };
+  if (unfinished)
+    return { state: "locked", lockReason: `Finish "${getSpec(unfinished)?.name}" first`, missing: [], missingContext: [] };
 
-  return { state: "available", lockReason: null, missing: [] };
+  return { state: "available", lockReason: null, missing: [], missingContext: [] };
 }

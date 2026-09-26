@@ -2,6 +2,7 @@ import { getSpec } from "@/lib/catalog";
 import { primitives } from "@/lib/catalog/primitives";
 import { logEvent } from "@/lib/db/events";
 import {
+  getDocs,
   getIntegrations,
   getMapNode,
   getMapNodes,
@@ -29,12 +30,13 @@ export async function startLevel(nodeId: string) {
   const node = await getMapNode(nodeId);
   if (node.ploy_id) return getPloy(node.ploy_id);
 
-  const [ploys, integrations, mapNodes] = await Promise.all([
+  const [ploys, integrations, mapNodes, docs] = await Promise.all([
     getPloys(node.workspace_id),
     getIntegrations(node.workspace_id),
     getMapNodes(node.workspace_id),
+    getDocs(node.workspace_id),
   ]);
-  const { state, lockReason } = nodeState(node, { ploys, integrations, mapNodes });
+  const { state, lockReason } = nodeState(node, { ploys, integrations, mapNodes, docs });
   if (state !== "available") throw new Error(`Level isn't available: ${lockReason ?? state}`);
 
   const spec = getSpec(node.spec_id)!;

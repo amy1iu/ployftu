@@ -13,6 +13,8 @@ export type Intent = {
   templates: string[];
   quickWin: QuickWinId;
   probes: string[];
+  /** The one follow-up on the trail when we don't know who they sell to yet. */
+  audienceQuestion: string;
 };
 
 export const intents = [
@@ -25,16 +27,18 @@ export const intents = [
     templates: ["lead_list", "inbound_capture", "cold_outbound"],
     quickWin: "lookalike_accounts",
     probes: ["Who are your best customers today?", "Where do most of your leads come from right now?"],
+    audienceQuestion: "Who are your best customers today?",
   },
   {
     id: "convert_site_visitors",
     label: "Convert more site visitors",
     examples: ["people visit but don't sign up", "low conversion", "better website", "clearer messaging"],
-    regions: { site_brand: 1, measure: 0.5 },
+    regions: { site_brand: 1, measure: 0.5, leads_data: 0.4 },
     primitives: ["sites", "brand_guidelines", "analytics"],
     templates: ["homepage_refresh", "inbound_capture", "site_dashboard"],
     quickWin: "homepage_audit",
     probes: ["What do you want a visitor to do first: book a call, sign up, or buy?", "Roughly how much traffic does your site get?"],
+    audienceQuestion: "Who do you most want visiting your site?",
   },
   {
     id: "run_outbound",
@@ -45,6 +49,7 @@ export const intents = [
     templates: ["cold_outbound", "lead_list", "crm_sync"],
     quickWin: "outreach_sequence",
     probes: ["Who's your ideal buyer (role and company type)?", "How are you doing outreach today, if at all?"],
+    audienceQuestion: "Who do you most want to reach out to?",
   },
   {
     id: "launch_paid_ads",
@@ -55,6 +60,7 @@ export const intents = [
     templates: ["paid_search", "retargeting", "landing_page_for_offer"],
     quickWin: "landing_page_draft",
     probes: ["Have you run ads before, and on which platforms?", "Is there a monthly budget you have in mind?"],
+    audienceQuestion: "Who should your ads reach?",
   },
   {
     id: "nurture_pipeline",
@@ -65,6 +71,7 @@ export const intents = [
     templates: ["lead_nurture", "crm_sync", "weekly_report"],
     quickWin: "outreach_sequence",
     probes: ["Where do your leads live today (CRM, spreadsheet, inbox)?", "What usually happens after someone first shows interest?"],
+    audienceQuestion: "Who are the leads you most want to close?",
   },
   {
     id: "grow_content_brand",
@@ -75,6 +82,7 @@ export const intents = [
     templates: ["linkedin_content", "seo_articles", "brand_kit"],
     quickWin: "social_posts",
     probes: ["Which channels matter most for your audience?", "How often are you publishing today?"],
+    audienceQuestion: "Who do you most want your content to reach?",
   },
   {
     id: "measure_performance",
@@ -85,6 +93,7 @@ export const intents = [
     templates: ["site_dashboard", "weekly_report", "channel_attribution"],
     quickWin: "homepage_audit",
     probes: ["What numbers do you check today, if any?", "Which tools hold your data (analytics, CRM)?"],
+    audienceQuestion: "Who are the customers you most want more of?",
   },
   {
     id: "automate_busywork",
@@ -95,6 +104,7 @@ export const intents = [
     templates: ["crm_sync", "lead_nurture", "weekly_report"],
     quickWin: "outreach_sequence",
     probes: ["What's the most repetitive thing you do each week?", "Which tools do you jump between most?"],
+    audienceQuestion: "Who are the customers you spend the most time on?",
   },
 ] as const satisfies readonly Intent[];
 

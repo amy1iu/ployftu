@@ -1,4 +1,5 @@
 import type { AgentToolId } from "./agent-tools";
+import type { ContextKey } from "./context";
 import type { IntegrationCategory } from "./integrations";
 import type { PrimitiveId } from "./primitives";
 import type { RegionId } from "./regions";
@@ -18,6 +19,8 @@ export type PloybookSpec = {
   steps: Step[];
   /** Capabilities that must be connected first (any tool that provides them). */
   requires: IntegrationCategory[];
+  /** Business context it needs first (e.g. who they sell to); asked for during onboarding. */
+  needsContext: ContextKey[];
   prereqs: string[];
   estMinutes: number;
   source: "template" | "quick_win" | "composed";
@@ -31,12 +34,13 @@ const p = (primitive: PrimitiveId, action: string, label: string): Step => ({
 });
 const t = (tool: AgentToolId, label: string): Step => ({ kind: "agent_tool", tool, label });
 
-type TemplateInput = Omit<PloybookSpec, "source" | "prereqs" | "requires" | "trigger"> &
-  Partial<Pick<PloybookSpec, "prereqs" | "requires" | "trigger">>;
+type TemplateInput = Omit<PloybookSpec, "source" | "prereqs" | "requires" | "trigger" | "needsContext"> &
+  Partial<Pick<PloybookSpec, "prereqs" | "requires" | "trigger" | "needsContext">>;
 
 const template = (spec: TemplateInput): PloybookSpec => ({
   trigger: "manual",
   requires: [],
+  needsContext: [],
   prereqs: [],
   ...spec,
   source: "template",
@@ -56,6 +60,7 @@ export const templates: PloybookSpec[] = [
       p("sites", "update_section", "Rewrite the hero section"),
       p("sites", "publish", "Publish the update"),
     ],
+    needsContext: ["offering"],
     estMinutes: 3,
   }),
   template({
@@ -68,6 +73,7 @@ export const templates: PloybookSpec[] = [
       p("sites", "create_page", "Build the page"),
       p("sites", "publish", "Publish it"),
     ],
+    needsContext: ["offering"],
     estMinutes: 5,
   }),
   template({
@@ -102,6 +108,7 @@ export const templates: PloybookSpec[] = [
       p("ploydb", "create_table", "Create a Target Accounts table"),
       p("ploydb", "upsert_rows", "Add accounts with fit notes"),
     ],
+    needsContext: ["audience"],
     estMinutes: 4,
   }),
   template({
@@ -115,6 +122,7 @@ export const templates: PloybookSpec[] = [
       p("ploydb", "create_table", "Create a Leads table"),
       p("ploybooks", "create_ploybook", "Save every submission as a lead"),
     ],
+    needsContext: ["offering"],
     estMinutes: 4,
   }),
   template({
@@ -147,6 +155,7 @@ export const templates: PloybookSpec[] = [
     ],
     requires: ["email"],
     prereqs: ["lead_list"],
+    needsContext: ["audience"],
     estMinutes: 5,
   }),
   template({
@@ -175,6 +184,7 @@ export const templates: PloybookSpec[] = [
       p("integrations", "post", "Post to LinkedIn"),
     ],
     requires: ["social"],
+    needsContext: ["audience"],
     estMinutes: 4,
   }),
   template({
@@ -189,6 +199,7 @@ export const templates: PloybookSpec[] = [
       p("sites", "create_page", "Publish them to your site"),
       p("ploybooks", "create_ploybook", "Repeat every month"),
     ],
+    needsContext: ["audience"],
     estMinutes: 6,
   }),
   template({
@@ -202,6 +213,7 @@ export const templates: PloybookSpec[] = [
       p("ads", "create_campaign", "Launch with a daily budget"),
     ],
     requires: ["search_ads"],
+    needsContext: ["offering", "audience"],
     estMinutes: 5,
   }),
   template({
@@ -243,6 +255,7 @@ export const templates: PloybookSpec[] = [
       p("integrations", "send_email", "Email it to you"),
     ],
     requires: ["analytics", "email"],
+    needsContext: ["goal"],
     estMinutes: 3,
   }),
   template({

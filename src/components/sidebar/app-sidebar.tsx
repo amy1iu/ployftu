@@ -1,9 +1,8 @@
 "use client";
 
-import { Bell, Gift, CircleHelp, Search } from "lucide-react";
+import { Bell, Gift, CircleHelp, Pin, Search } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { currentUser, recentSites } from "@/lib/mock-data";
-import { tutorialProgress } from "@/lib/onboarding/tutorial";
 import { Tooltip } from "../tooltip";
 import { useWorkspace } from "../workspace/workspace-provider";
 import { libraryNav, primaryNav } from "./nav-config";
@@ -22,12 +21,9 @@ function PanelToggleIcon() {
 
 export function AppSidebar({ onToggle }: { onToggle: () => void }) {
   const pathname = usePathname();
-  const state = useWorkspace();
-  const { workspace, ploys } = state;
+  const { ploys } = useWorkspace();
   const onboarding = ploys.find((p) => p.kind === "onboarding");
   const tasks = ploys.filter((p) => p.kind === "task").toReversed();
-  const tutorialActive = workspace.onboarding_status === "active";
-  const progress = tutorialProgress(state);
 
   return (
     <aside className="flex h-dvh w-60 shrink-0 flex-col border-r border-sidebar-edge bg-sidebar pr-[9px] pl-[7px]">
@@ -73,22 +69,15 @@ export function AppSidebar({ onToggle }: { onToggle: () => void }) {
         </SidebarSection>
 
         <SidebarSection label="Your Ploys">
-          {/* Getting Started is always pinned first, and styled as special while the tutorial is active. */}
+          {/* Getting Started is always pinned first. */}
           {onboarding && (
             <PloyRow
               href="/"
               active={pathname === "/"}
-              className={tutorialActive ? "font-accent text-[17px] text-accent" : ""}
               status={
-                tutorialActive ? (
-                  <Tooltip label="Tutorial progress">
-                    <span className="rounded-full bg-accent-soft px-1.5 text-[11px] text-accent tabular-nums">
-                      {progress.done}/{progress.total}
-                    </span>
-                  </Tooltip>
-                ) : (
-                  <PloyStatus ploy={onboarding} />
-                )
+                <Tooltip label="Pinned">
+                  <Pin size={13} strokeWidth={1.75} className="text-subtle" />
+                </Tooltip>
               }
             >
               {onboarding.title}

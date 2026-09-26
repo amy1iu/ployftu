@@ -1,7 +1,8 @@
 import type { OnboardingUIMessage } from "@/lib/ai/onboarding/messages";
 import { currentUser } from "@/lib/mock-data";
+import { websiteQuestion } from "./trail";
 
-// Q1 of the entry flow: website, with a useful path for people without one.
+// The trail's first card: their website, with a path for people without one.
 export function greetingMessage(): OnboardingUIMessage {
   return {
     id: "greeting",
@@ -9,13 +10,9 @@ export function greetingMessage(): OnboardingUIMessage {
     parts: [
       {
         type: "text",
-        text: `Hey ${currentUser.firstName}, I'm your Ploy guide. In the next few minutes I'll learn how your business works, make you a first deliverable, and map out what Ploy can take off your plate.
-
-First: **do you have a website?** Paste the link and I'll read it. That's the fastest way for me to get up to speed.
-
-No site yet? No problem. Tell me in a sentence what you do, and I can draft a landing page as one of your first wins.`,
+        text: `Hey ${currentUser.firstName}, I'm your Ploy guide. A few quick questions, and I'll map out what Ploy can do for your business, starting with something useful in the next few minutes.`,
       },
-      { type: "data-replies", data: { options: ["I don't have a website yet", "It's not live yet"] } },
+      { type: "data-question", data: websiteQuestion() },
     ],
   };
 }

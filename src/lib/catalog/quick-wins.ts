@@ -6,6 +6,7 @@ import type { PloybookSpec } from "./ploybooks";
 
 export const quickWins = {
   homepage_audit: {
+    label: "Audit my homepage",
     needsWebsite: true,
     pickWhen: "They have a website, and either have no clear goal or want more conversions.",
     spec: {
@@ -20,6 +21,7 @@ export const quickWins = {
         { kind: "primitive", primitive: "docs", action: "create_doc", label: "Save the audit to Docs" },
       ],
       requires: [],
+      needsContext: [],
       prereqs: [],
       estMinutes: 2,
       source: "quick_win",
@@ -32,6 +34,7 @@ export const quickWins = {
     }),
   },
   outreach_sequence: {
+    label: "Write a cold email sequence",
     needsWebsite: false,
     pickWhen: "They want outbound, pipeline, or follow-up help.",
     spec: {
@@ -46,6 +49,7 @@ export const quickWins = {
         { kind: "primitive", primitive: "ploybooks", action: "create_ploybook", label: "Draft the sequence as a Ploybook" },
       ],
       requires: [],
+      needsContext: ["audience"],
       prereqs: [],
       estMinutes: 2,
       source: "quick_win",
@@ -56,6 +60,7 @@ export const quickWins = {
     }),
   },
   lookalike_accounts: {
+    label: "Find accounts like my best customers",
     needsWebsite: false,
     pickWhen: "They want more leads and can describe who their best customers are.",
     spec: {
@@ -70,6 +75,7 @@ export const quickWins = {
         { kind: "primitive", primitive: "ploydb", action: "upsert_rows", label: "Add accounts with fit notes" },
       ],
       requires: [],
+      needsContext: ["audience"],
       prereqs: [],
       estMinutes: 2,
       source: "quick_win",
@@ -80,6 +86,7 @@ export const quickWins = {
     }),
   },
   social_posts: {
+    label: "Draft 3 LinkedIn posts",
     needsWebsite: false,
     pickWhen: "They want brand awareness, content, or social presence.",
     spec: {
@@ -93,6 +100,7 @@ export const quickWins = {
         { kind: "primitive", primitive: "docs", action: "create_doc", label: "Save the drafts to Docs" },
       ],
       requires: [],
+      needsContext: ["offering"],
       prereqs: [],
       estMinutes: 2,
       source: "quick_win",
@@ -100,6 +108,7 @@ export const quickWins = {
     output: z.object({ posts: z.array(z.object({ hook: z.string(), body: z.string() })).length(3) }),
   },
   landing_page_draft: {
+    label: "Draft a landing page",
     needsWebsite: false,
     pickWhen: "They don't have a website yet, or want a page for a specific offer or ad campaign.",
     spec: {
@@ -114,6 +123,7 @@ export const quickWins = {
         { kind: "primitive", primitive: "docs", action: "create_doc", label: "Save the copy to Docs" },
       ],
       requires: [],
+      needsContext: ["offering"],
       prereqs: [],
       estMinutes: 2,
       source: "quick_win",
@@ -126,7 +136,14 @@ export const quickWins = {
   },
 } satisfies Record<
   string,
-  { needsWebsite: boolean; pickWhen: string; spec: PloybookSpec; output: z.ZodType }
+  {
+    /** How the user picks it on the trail, e.g. "Audit my homepage". */
+    label: string;
+    needsWebsite: boolean;
+    pickWhen: string;
+    spec: PloybookSpec;
+    output: z.ZodType;
+  }
 >;
 
 export type QuickWinId = keyof typeof quickWins;

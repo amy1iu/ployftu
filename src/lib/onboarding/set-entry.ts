@@ -86,12 +86,13 @@ export async function applyEntryUpdate(workspaceId: string, update: EntryUpdate,
     );
   }
 
-  // Fills these in only while empty; corrections to existing content (e.g. from
-  // their site) are merged in by recordProfileNotes instead.
+  // What they do fills in only while empty; corrections to existing content
+  // (e.g. from their site) are merged in by recordProfileNotes instead. Who
+  // they want to reach is theirs to say, so it replaces what the site suggested.
   if (update.business) {
     const { whatTheyDo, whoTheyServe } = update.business;
-    const user = { status: "confirmed", source: "user", ifEmpty: true } as const;
-    if (whatTheyDo) patches.push({ slug: "business-overview", key: "what-we-do", body: whatTheyDo, ...user });
+    const user = { status: "confirmed", source: "user" } as const;
+    if (whatTheyDo) patches.push({ slug: "business-overview", key: "what-we-do", body: whatTheyDo, ...user, ifEmpty: true });
     if (whoTheyServe) patches.push({ slug: "business-overview", key: "who-we-serve", body: whoTheyServe, ...user });
   }
 

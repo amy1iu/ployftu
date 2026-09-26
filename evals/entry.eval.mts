@@ -1,6 +1,7 @@
-// Entry-flow eval (phase 1, gate 2 + 3). Runs every persona through the real
-// Getting Started pipeline against a throwaway workspace, with an LLM playing
-// the user, then scores the result against the phase 1 thresholds.
+// Getting Started trail eval. Runs every persona through the real trail
+// pipeline against a throwaway workspace, with an LLM playing the user (tapping
+// chips or typing, as the persona would), then scores how quickly and
+// accurately it matched their intent to the right capability.
 //
 //   npm run eval:entry                 all personas
 //   npm run eval:entry -- a_terse d_*  filter by id (prefix* supported)
@@ -10,20 +11,21 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { generateText, Output, readUIMessageStream, type UIMessageChunk } from "ai";
 import { z } from "zod";
 import { onboardingTurn, type OnboardingUIMessage } from "@/lib/ai/onboarding";
-import { textOf } from "@/lib/ai/onboarding/text";
-import { getIntent } from "@/lib/catalog/intents";
-import { createWorkspace, getDocs, getWorkspace } from "@/lib/db/workspaces";
+import { getSpec } from "@/lib/catalog";
+import { getIntent, type IntentId } from "@/lib/catalog/intents";
+import { quickWins, type QuickWinId } from "@/lib/catalog/quick-wins";
+import { createWorkspace, getDocs, getMapNodes, getPloys, getWorkspace } from "@/lib/db/workspaces";
 import { readSection } from "@/lib/docs/markdown";
+import { syncMap } from "@/lib/map/sync";
 import { entryBranch } from "@/lib/onboarding/entry";
 import { greetingMessage } from "@/lib/onboarding/greeting";
+import { answeredSlots, openQuestion, type AnsweredData, type AnsweredSlot, type QuestionData } from "@/lib/onboarding/trail";
 import { db } from "@/lib/supabase/admin";
 import { personas, type Persona } from "./personas";
 
-const MAX_USER_TURNS = 4;
+const MAX_USER_TURNS = 8;
 const CONCURRENCY = 4;
-// The simulated user and the judge.
 const simulatorModel = process.env.EVAL_SIMULATOR_MODEL ?? "openai/gpt-4o";
-const judgeModel = process.env.EVAL_JUDGE_MODEL ?? "openai/gpt-4o-mini";
 
 const args = process.argv.slice(2);
 const keep = args.includes("--keep");
@@ -32,19 +34,27 @@ const selected = filters.length
   ? personas.filter((p) => filters.some((f) => (f.endsWith("*") ? p.id.startsWith(f.slice(0, -1)) : p.id === f)))
   : personas;
 
-const chipsOf = (m: OnboardingUIMessage) =>
-  m.parts.flatMap((p) => (p.type === "data-replies" ? p.data.options : []));
+const part = <T,>(m: OnboardingUIMessage, type: string) =>
+  (m.parts.find((p) => p.type === type) as { data: T } | undefined)?.data;
+const text = (m: OnboardingUIMessage) => m.parts.map((p) => (p.type === "text" ? p.text : "")).join("").trim();
+const card = (q: { question: string; chips: { label: string }[] }) =>
+  `${q.question}${q.chips.length ? ` [chips: ${q.chips.map((c) => c.label).join(" | ")}]` : " [type an answer]"}`;
 
+/** The trail as the simulated user sees it. */
 function transcript(messages: OnboardingUIMessage[]) {
   return messages
     .map((m) => {
-      const chips = chipsOf(m);
-      return `${m.role === "user" ? "User" : "Assistant"}: ${textOf(m)}${chips.length ? `\n[reply chips: ${chips.join(" | ")}]` : ""}`;
+      if (m.role === "user") return `You: ${text(m)}`;
+      const q = part<QuestionData>(m, "data-question");
+      const lines = [text(m) && `Ploy: ${text(m)}`];
+      if (q?.alt) lines.push(`Ploy shows two cards. Quick win: ${card(q.alt)}  OR  Bigger goal: ${card(q)}`);
+      else if (q) lines.push(`Ploy asks: ${card(q)}`);
+      return lines.filter(Boolean).join("\n");
     })
-    .join("\n\n");
+    .join("\n");
 }
 
-/** Hard facts the simulated user must not contradict, even when a reply chip suggests otherwise. */
+/** Hard facts the simulated user must not contradict, even when a chip suggests otherwise. */
 function facts({ expect }: Persona) {
   const website = {
     has: `You have a website (${expect.domain}); give it when asked.`,
@@ -53,33 +63,47 @@ function facts({ expect }: Persona) {
   }[expect.website];
   const goals =
     expect.goals === "has"
-      ? "You have a specific goal: the one in your persona. State it in your own words; don't swap it for the assistant's examples or chips."
-      : "You genuinely don't know what to focus on. Never choose a specific goal, even if the assistant suggests options or offers chips; say you're not sure or ask for a suggestion.";
+      ? "You have a specific goal: the one in your persona. When offered a quick win or a bigger goal, answer the bigger goal card. Tap a goal chip only if it says what you want; otherwise type it in your own words."
+      : "You genuinely don't know what to focus on. Never choose a specific goal; tap 'Not sure yet' or say you're not sure. When offered a quick win or a bigger goal, you may pick either.";
   return `${website}\n${goals}`;
 }
 
-async function simulateUser(persona: Persona, messages: OnboardingUIMessage[]) {
-  const { text } = await generateText({
+const moveSchema = z.object({
+  card: z.enum(["main", "quick_win"]).describe("Which card you're answering: quick_win only for the Quick win card"),
+  chip: z.string().nullable().describe("A chip's exact label to tap it, or null to type"),
+  text: z.string().nullable().describe("What you type, when not tapping a chip"),
+});
+
+async function simulateUser(persona: Persona, messages: OnboardingUIMessage[], asked: QuestionData) {
+  const { output } = await generateText({
     model: simulatorModel,
-    system: `You're role-playing a small-business owner in their first chat with Ploy, a marketing platform's onboarding assistant.
+    system: `You're role-playing a small-business owner going through Ploy's onboarding: short question cards, each with tappable chips and a text box.
 Persona: ${persona.script}
 Facts you must never contradict:
 ${facts(persona)}
-Reply as this person would, answering what the assistant asked. Keep it short (1-2 sentences) unless the persona says otherwise. Output only your message.`,
-    prompt: `${transcript(messages)}\n\nYour reply:`,
+Tap a chip when one says what you'd say; otherwise type a short reply (1-2 sentences) as this person would. If the persona says to type something specific, type it.`,
+    prompt: `${transcript(messages)}\n\nYour move:`,
+    output: Output.object({ schema: moveSchema }),
   });
-  return text.trim();
+  // In the app a chip belongs to its card, so find it on either one.
+  const altChip = asked.alt?.chips.find((c) => c.label === output.chip);
+  const onAlt = altChip ? true : output.card === "quick_win" && !!asked.alt;
+  const slot: AnsweredSlot = asked.slot === "fork" ? (onAlt ? "quick_win" : "goal") : asked.slot;
+  const chip = output.chip ? (altChip ?? asked.chips.find((c) => c.label === output.chip)) : undefined;
+  return chip
+    ? { text: chip.label, metadata: { slot, value: chip.value } }
+    : { text: (output.text ?? output.chip ?? "").trim() || "not sure", metadata: { slot } };
 }
 
-/** Runs one real turn and times the first streamed text. */
+/** Runs one real step and times the next question. */
 async function runTurn(workspaceId: string, messages: OnboardingUIMessage[]) {
   const started = performance.now();
-  let firstText: number | null = null;
-  const { stream } = await onboardingTurn({ workspaceId, messages, onSaved: async () => {}, sideEffects: false });
+  let questionAt: number | null = null;
+  const { stream, background } = await onboardingTurn({ workspaceId, messages, onSaved: async () => {}, sideEffects: false });
   const timed = stream.pipeThrough(
     new TransformStream<UIMessageChunk, UIMessageChunk>({
       transform(chunk, controller) {
-        if (chunk.type === "text-delta" && firstText === null) firstText = performance.now() - started;
+        if (chunk.type === "data-question" && questionAt === null) questionAt = performance.now() - started;
         controller.enqueue(chunk);
       },
     }),
@@ -87,63 +111,75 @@ async function runTurn(workspaceId: string, messages: OnboardingUIMessage[]) {
   let reply: OnboardingUIMessage | undefined;
   for await (const message of readUIMessageStream<OnboardingUIMessage>({ stream: timed })) reply = message;
   if (!reply) throw new Error("No reply");
-  return { reply, firstTextMs: firstText ?? performance.now() - started, totalMs: performance.now() - started };
+  await background;
+  return { reply, nextQuestionMs: questionAt };
 }
 
-const judgeSchema = z.object({
-  reasked: z
-    .boolean()
-    .describe(
-      "The assistant asked for something the user had already given: their website, their goal, or what the business does. Asking them to restate, confirm, or make an answer 'more specific' counts. New follow-up questions don't. After the user says they're not sure, suggesting concrete options and asking which fits is expected, not a re-ask; asking an open 'what's your goal?' again is.",
-    ),
-  reaskEvidence: z.string().nullable(),
-  gaveGuidance: z
-    .boolean()
-    .describe(
-      "Right after the user said they have no (live) website or aren't sure about goals, did the assistant's next message offer something concrete Ploy can do for them?",
-    ),
-  guidanceEvidence: z.string().nullable(),
-});
-
-/** Guidance only applies when the persona says "no site" or "not sure"; that's known from the persona, not judged. */
-const needsGuidance = (p: Persona) => p.expect.website !== "has" || p.expect.goals === "unsure";
-
-async function judge(persona: Persona, messages: OnboardingUIMessage[]) {
-  const { output } = await generateText({
-    model: judgeModel,
-    system:
-      "You grade onboarding conversations for a marketing platform. Be strict and literal. Answer from the transcript only.",
-    prompt: transcript(messages),
-    output: Output.object({ schema: judgeSchema }),
-  });
-  return { ...output, gaveGuidance: needsGuidance(persona) ? output.gaveGuidance : null };
+/** The first deliverables that fit the persona: its goal's (a landing page without a site), or the starter for "not sure". */
+function expectedQuickWins({ expect }: Persona): QuickWinId[] {
+  if (expect.goals === "unsure") return [expect.website === "has" ? "homepage_audit" : "landing_page_draft"];
+  const picks = (expect.intents ?? []).map((id) => getIntent(id).quickWin);
+  return picks.map((q) => (expect.website !== "has" && quickWins[q].needsWebsite ? "landing_page_draft" : q));
 }
 
-const questionCount = (text: string) => (text.replace(/https?:\/\/\S+/g, "").match(/\?/g) ?? []).length;
+/**
+ * The Ploybooks that should show up for the persona: the recorded goal's own
+ * (if it's one the persona could mean; otherwise their first), or a starter
+ * set for "not sure".
+ */
+function expectedTemplates({ expect }: Persona, recorded: IntentId | undefined): string[] {
+  if (expect.goals === "unsure") return expect.website === "has" ? ["homepage_refresh", "brand_kit"] : ["landing_page_for_offer", "lead_list"];
+  const intent = recorded && expect.intents?.includes(recorded) ? recorded : expect.intents?.[0];
+  return intent ? [...getIntent(intent).templates] : [];
+}
+
+const words = (s: string) => s.trim().split(/\s+/).length;
 
 async function runPersona(persona: Persona) {
   const workspace = await createWorkspace({ isEval: true });
   const messages: OnboardingUIMessage[] = [greetingMessage()];
-  const timings: { firstTextMs: number; totalMs: number }[] = [];
-  let resolvedAt: number | null = null;
+  const timings: number[] = [];
 
   try {
     for (let turn = 1; turn <= MAX_USER_TURNS; turn++) {
-      const text = await simulateUser(persona, messages);
-      messages.push({ id: `u${turn}`, role: "user", parts: [{ type: "text", text }] });
-      const { reply, ...timing } = await runTurn(workspace.id, messages);
+      const asked = openQuestion(messages);
+      if (!asked) break;
+      const move = await simulateUser(persona, messages, asked);
+      messages.push({ id: `u${turn}`, role: "user", parts: [{ type: "text", text: move.text }], metadata: move.metadata });
+      const { reply, nextQuestionMs } = await runTurn(workspace.id, messages);
       messages.push(reply);
-      timings.push(timing);
-      if (entryBranch((await getWorkspace(workspace.id)).entry)) {
-        resolvedAt = turn;
-        break;
-      }
+      if (nextQuestionMs !== null) timings.push(nextQuestionMs);
     }
 
-    const [final, docs, verdict] = await Promise.all([getWorkspace(workspace.id), getDocs(workspace.id), judge(persona, messages)]);
+    await syncMap(workspace.id); // the eval skips side effects; place the tasks now
+    const [final, docs, ploys, nodes] = await Promise.all([
+      getWorkspace(workspace.id),
+      getDocs(workspace.id),
+      getPloys(workspace.id),
+      getMapNodes(workspace.id),
+    ]);
     const { entry } = final;
     const { expect } = persona;
     const doc = (slug: string) => docs.find((d) => d.slug === slug)!;
+
+    // What the trail asked: every card, and whether its slot was already answered at the time.
+    const questions: { slot: string; question: string; chips: number; reask: boolean }[] = [];
+    messages.forEach((m, i) => {
+      const q = part<QuestionData>(m, "data-question");
+      if (!q) return;
+      const before = answeredSlots(messages.slice(0, i + 1));
+      const slots = q.slot === "fork" ? ["goal", "quick_win"] : [q.slot];
+      questions.push({ slot: q.slot, question: q.question, chips: q.chips.length, reask: slots.some((s) => before.has(s as AnsweredSlot)) });
+    });
+    const answers = messages.flatMap((m) => {
+      const a = part<AnsweredData>(m, "data-answered");
+      return a ? [a] : [];
+    });
+
+    const quickWin = ploys.find((p) => p.spec?.source === "quick_win");
+    const picked = answers.some((a) => a.slot === "quick_win");
+    const onMap = nodes.filter((n) => getSpec(n.spec_id)?.source === "template").map((n) => n.spec_id);
+    const fit = expectedTemplates(persona, entry.goals.intents[0]?.id);
 
     const docChecks: Record<string, boolean> = {
       websiteSection:
@@ -153,32 +189,36 @@ async function runPersona(persona: Persona) {
           : !(readSection(doc("business-overview").content_md, "Website") ?? "").includes("http")),
       goalsSection: doc("goals-and-focus").sections.goals?.status === "confirmed",
     };
-    if (expect.goals === "has" && entry.goals.intents[0])
-      docChecks.focusSection = (readSection(doc("goals-and-focus").content_md, "Focus areas") ?? "").includes(
-        getIntent(entry.goals.intents[0].id).label,
-      );
 
-    const assistantTurns = messages.slice(1).filter((m) => m.role === "assistant");
     return {
       id: persona.id,
       expected: expect.branch,
       branch: entryBranch(entry),
-      resolvedAt,
-      website: entry.website,
-      goals: entry.goals,
+      finished: !openQuestion(messages),
+      questions,
+      answers,
+      quickWin: quickWin?.spec?.id ?? null,
+      picked,
+      onMap,
+      fit,
       checks: {
         branch: entryBranch(entry) === expect.branch,
         websiteStatus: entry.website.status === expect.website,
         domain: expect.domain ? (entry.website.url ?? "").includes(expect.domain) : null,
         intent: expect.intents ? expect.intents.includes(entry.goals.intents[0]?.id) : null,
         unsupported: expect.unsupported ? !!entry.goals.unmatched : null,
-        noReask: !verdict.reasked,
-        guidance: verdict.gaveGuidance,
+        // A first win they picked themselves fits by definition; ours has to match their goal.
+        // Goals Ploy doesn't cover have no expected first win.
+        firstWin:
+          picked || (expect.goals === "has" && !expect.intents)
+            ? null
+            : !!quickWin?.spec && expectedQuickWins(persona).includes(quickWin.spec.id as QuickWinId),
+        unsureGetsAWin: expect.goals === "unsure" ? !!quickWin : null,
       },
+      // Did the right capabilities surface? Share of the goal's Ploybooks on their map.
+      taskRecall: fit.length ? fit.filter((id) => onMap.includes(id)).length / fit.length : null,
       docChecks,
-      oneQuestion: assistantTurns.map((m) => questionCount(textOf(m)) <= 1),
       timings,
-      verdict,
       transcript: transcript(messages),
     };
   } finally {
@@ -208,6 +248,7 @@ const rate = (values: (boolean | null)[]) => {
   const scored = values.filter((v): v is boolean => v !== null);
   return { rate: scored.length ? scored.filter(Boolean).length / scored.length : 1, n: scored.length };
 };
+const mean = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
 
 console.log(`Running ${selected.length} personas…\n`);
 const results = await pool(selected, CONCURRENCY, async (p) => {
@@ -215,7 +256,7 @@ const results = await pool(selected, CONCURRENCY, async (p) => {
     const r = await runPersona(p);
     const failed = Object.entries({ ...r.checks, ...r.docChecks }).filter(([, v]) => v === false).map(([k]) => k);
     console.log(
-      `${failed.length ? "✗" : "✓"} ${p.id.padEnd(28)} path ${r.branch ?? "-"}/${r.expected}  turns ${r.resolvedAt ?? "-"}${failed.length ? `  failed: ${failed.join(", ")}` : ""}`,
+      `${failed.length ? "✗" : "✓"} ${p.id.padEnd(28)} path ${r.branch ?? "-"}/${r.expected}  ${r.questions.length} cards  win ${r.quickWin ?? "-"}${r.picked ? " (picked)" : ""}${failed.length ? `  failed: ${failed.join(", ")}` : ""}`,
     );
     return r;
   } catch (error) {
@@ -225,30 +266,38 @@ const results = await pool(selected, CONCURRENCY, async (p) => {
 });
 
 const ok = results.filter((r) => r !== null);
-const turns = ok.map((r) => r.resolvedAt ?? Infinity);
-const firstText = ok.flatMap((r) => r.timings.map((t) => t.firstTextMs));
+const cards = ok.map((r) => r.questions.length);
+const allQuestions = ok.flatMap((r) => r.questions);
+const nextQuestion = ok.flatMap((r) => r.timings);
 const metrics = [
   { name: "Path classified correctly", ...rate(ok.map((r) => r.checks.branch)), target: 0.95 },
-  { name: "User turns to resolve (median)", value: percentile(turns, 50), max: 2 },
-  { name: "User turns to resolve (max)", value: Math.max(...turns), max: 4 },
-  { name: "Re-asks something already answered", value: ok.filter((r) => !r.checks.noReask).length, max: 0 },
-  { name: "One question per agent message", ...rate(ok.flatMap((r) => r.oneQuestion)), target: 0.95 },
-  { name: "'No'/'not sure' gets a concrete suggestion", ...rate(ok.map((r) => r.checks.guidance)), target: 0.9 },
   { name: "Top intent matches", ...rate(ok.map((r) => r.checks.intent)), target: 0.85 },
   { name: "Unsupported goals flagged", ...rate(ok.map((r) => r.checks.unsupported)), target: 1 },
+  { name: "First win fits their goal (when we chose it)", ...rate(ok.map((r) => r.checks.firstWin)), target: 0.9 },
+  { name: "'Not sure' still gets a first win", ...rate(ok.map((r) => r.checks.unsureGetsAWin)), target: 1 },
+  (() => {
+    const recall = ok.map((r) => r.taskRecall).filter((v): v is number => v !== null);
+    return { name: "Goal's Ploybooks on their map (recall)", rate: mean(recall), n: recall.length, target: 0.8 };
+  })(),
+  { name: "Reaches the end of the trail", ...rate(ok.map((r) => r.finished)), target: 0.95 },
+  { name: "Cards to finish (median)", value: percentile(cards, 50), max: 5 },
+  { name: "Cards to finish (max)", value: Math.max(...cards), max: 6 },
+  { name: "Questions of 15 words or fewer", ...rate(allQuestions.map((q) => words(q.question) <= 15)), target: 0.95 },
+  { name: "2-5 chips (or free text by design)", ...rate(allQuestions.map((q) => (q.slot === "sell" ? true : q.chips >= 2 && q.chips <= 5))), target: 0.95 },
+  { name: "Re-asks an answered question", value: allQuestions.filter((q) => q.reask).length, max: 0 },
   { name: "Answers land in the right doc section", ...rate(ok.flatMap((r) => Object.values(r.docChecks))), target: 0.95 },
-  { name: "Time to first token p50 (ms)", value: Math.round(percentile(firstText, 50)), max: 1500 },
-  { name: "Time to first token p95 (ms)", value: Math.round(percentile(firstText, 95)), max: 3000 },
+  { name: "Answer to next card p50 (ms)", value: Math.round(percentile(nextQuestion, 50)), max: 2000 },
+  { name: "Answer to next card p95 (ms)", value: Math.round(percentile(nextQuestion, 95)), max: 4000 },
   { name: "Personas that errored", value: results.length - ok.length, max: 0 },
 ];
 
-console.log("\nPhase 1 gates");
+console.log("\nTrail gates");
 let allPass = true;
 for (const m of metrics) {
   const pass = "target" in m ? m.rate! >= m.target! : m.value! <= m.max!;
   allPass &&= pass;
   const shown = "target" in m ? `${(m.rate! * 100).toFixed(0)}% (n=${m.n})  target ≥ ${m.target! * 100}%` : `${m.value}  target ≤ ${m.max}`;
-  console.log(`  ${pass ? "✓" : "✗"} ${m.name.padEnd(44)} ${shown}`);
+  console.log(`  ${pass ? "✓" : "✗"} ${m.name.padEnd(46)} ${shown}`);
 }
 
 await mkdir("evals/results", { recursive: true });

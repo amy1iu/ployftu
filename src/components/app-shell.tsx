@@ -3,35 +3,9 @@
 import { PanelLeft } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useState } from "react";
-import { MapPanel } from "./map/map-panel";
-import { MapPanelProvider, useMapPanel } from "./map/map-panel-state";
 import { AppSidebar } from "./sidebar/app-sidebar";
+import { TaskPanel, TaskPanelProvider } from "./tasks/task-panel";
 import { TaskToasts } from "./task-toasts";
-
-/**
- * The growth map beside the chat: on wide screens a card taking the right
- * two-thirds under the page header (the chat narrows to the left third); on
- * narrow screens it opens over the page. Toggled from the page header.
- */
-function MapArea() {
-  const { docked, overlay, closeOverlay } = useMapPanel();
-  return (
-    <>
-      {docked && (
-        <div className="absolute top-[72px] right-5 bottom-5 left-[calc(max(34%,420px)+8px)] hidden xl:block">
-          <MapPanel />
-        </div>
-      )}
-      {overlay && (
-        <div className="fixed inset-0 z-40 flex justify-end bg-black/20 p-3 xl:hidden" onClick={closeOverlay}>
-          <div className="h-full w-[min(640px,100%)]" onClick={(e) => e.stopPropagation()}>
-            <MapPanel onClose={closeOverlay} />
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -43,7 +17,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const overlayOpen = overlayOn === pathname;
 
   return (
-    <MapPanelProvider>
+    <TaskPanelProvider>
       <div className="flex h-dvh overflow-hidden">
         {docked && (
           <div className="hidden lg:flex">
@@ -67,10 +41,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             <PanelLeft size={20} strokeWidth={1.5} />
           </button>
           {children}
-          <MapArea />
         </main>
+        {/* The task list: beside Getting Started and task ploys, and kept open between them. */}
+        <TaskPanel />
         <TaskToasts />
       </div>
-    </MapPanelProvider>
+    </TaskPanelProvider>
   );
 }

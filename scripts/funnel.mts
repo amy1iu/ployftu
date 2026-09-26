@@ -13,7 +13,7 @@ const steps: { label: string; match: (e: Event) => boolean }[] = [
   { label: "Answered the website question", match: (e) => e.name === "website_answered" },
   { label: "Answered the goals question", match: (e) => e.name === "goals_answered" },
   { label: "Path set (both answered)", match: (e) => e.name === "branch_resolved" },
-  { label: "Confirmed their profile", match: (e) => e.name === "profile_confirmed" },
+  { label: "Picked a quick win or a goal", match: (e) => e.name === "question_answered" && ["goal", "quick_win"].includes(String(e.props.slot)) },
   { label: "First deliverable started", match: (e) => e.name === "quick_win_started" },
   { label: "First deliverable ready", match: (e) => e.name === "quick_win_done" },
   { label: "Started a task on the map", match: (e) => e.name === "level_started" },
@@ -49,5 +49,8 @@ const count = (values: unknown[]) =>
 console.log(`Paths:                     ${count(events.filter((e) => e.name === "branch_resolved").map((e) => e.props.branch))}`);
 console.log(`Turns to set the path:     ${count(events.filter((e) => e.name === "branch_resolved").map((e) => e.props.userTurns))}`);
 console.log(`Sites that couldn't be read: ${events.filter((e) => e.name === "site_unreadable").length}`);
+const answers = events.filter((e) => e.name === "question_answered");
+console.log(`Answers by chip vs typed:  ${count(answers.map((e) => e.props.via))}`);
+console.log(`Quick win picked at fork:  ${events.filter((e) => e.name === "quick_win_started" && e.props.picked).length}`);
 const unmatched = events.filter((e) => e.name === "unmatched_intent").map((e) => `"${e.props.text}"`);
 console.log(`Asked for, not covered:    ${unmatched.length ? unmatched.join("; ") : "none"}`);

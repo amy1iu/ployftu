@@ -4,6 +4,8 @@ export type CrawlPage = { url: string; path: string; status: "reading" | "done" 
 
 /** What we learned from the site, drafted for the user to confirm. */
 export type SiteSummary = {
+  /** What the business is in 2-4 words, e.g. "Specialty coffee roaster". Missing from summaries cached before it existed. */
+  label?: string;
   oneLiner: string;
   whatYouDo: string;
   whoYouServe: string;

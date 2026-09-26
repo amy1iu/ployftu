@@ -1,4 +1,5 @@
 import { getIntent, quickWins, type IntentId, type QuickWinId } from "@/lib/catalog";
+import type { IntegrationCategory } from "@/lib/catalog/integrations";
 
 // The two entry questions. Every later step (playback, quick win, map
 // emphasis) branches on these answers.
@@ -15,6 +16,8 @@ export type Entry = {
   };
   /** The user turn on which both answers were in; the first deliverable starts after it. */
   resolvedAtTurn?: number | null;
+  /** Tools they told us they use, by capability (e.g. email: "Gmail"). Named, not connected: connecting needs their approval. */
+  tools?: Partial<Record<IntegrationCategory, string>>;
 };
 
 export const emptyEntry: Entry = {

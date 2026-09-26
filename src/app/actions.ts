@@ -10,11 +10,14 @@ import {
   connectIntegration as saveIntegration,
   createWorkspace,
   getPloy,
+  getWorkspace,
   openWorkspace,
   setOnboardingStatus,
   updatePloy,
 } from "@/lib/db/workspaces";
+import { recordProfileNotes } from "@/lib/ai/onboarding/profile-notes";
 import { runLevel, startLevel } from "@/lib/map/levels";
+import { syncMap } from "@/lib/map/sync";
 import { resetQuickWin, runQuickWin } from "@/lib/quick-wins/run";
 import { replyInPloy } from "@/lib/tasks/reply";
 import { confirmSiteProfile } from "@/lib/site/run";
@@ -40,6 +43,22 @@ export async function updateOnboardingStatus(workspaceId: string, status: Onboar
 
 export async function confirmProfile(workspaceId: string) {
   await confirmSiteProfile(workspaceId);
+}
+
+/** "Fix something" on the profile drafted from their site: apply their correction, then confirm the rest. */
+export async function fixProfile(workspaceId: string, correction: string) {
+  const { crawl } = await getWorkspace(workspaceId);
+  await recordProfileNotes(workspaceId, [
+    {
+      id: "profile",
+      role: "assistant",
+      parts: [{ type: "text", text: `Here's what I picked up from your site: ${crawl?.summary?.oneLiner ?? ""} What should I fix?` }],
+    },
+    { id: "fix", role: "user", parts: [{ type: "text", text: correction }] },
+  ]);
+  await confirmSiteProfile(workspaceId);
+  await logEvent(workspaceId, "profile_fixed");
+  after(() => syncMap(workspaceId)); // what they sell or who they sell to can unlock tasks
 }
 
 export async function markPloyRead(ployId: string) {

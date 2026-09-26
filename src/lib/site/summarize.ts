@@ -5,6 +5,7 @@ import { intentIds, intents } from "@/lib/catalog/intents";
 import type { ReadPage, SiteOpportunity, SiteSummary } from "./types";
 
 export const siteSummarySchema = z.object({
+  label: z.string().describe("What the business is, in 2-4 words, e.g. 'Specialty coffee roaster'"),
   oneLiner: z.string().describe("One sentence: what they sell and to whom, in plain words"),
   whatYouDo: z.string().describe("1-2 sentences on what the business does"),
   whoYouServe: z.string().describe("Who their customers are, as specifically as the site says"),

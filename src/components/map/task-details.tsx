@@ -12,32 +12,38 @@ import { regions, type RegionId } from "@/lib/catalog/regions";
 import type { MapNode } from "@/lib/db/types";
 import { nodeState } from "@/lib/map/state";
 import { useWorkspace } from "../workspace/workspace-provider";
-import { regionColors } from "./theme";
+import { regionTheme } from "./theme";
 
 const stateLabel = { locked: "Locked", available: "Ready", running: "Running", done: "Done", live: "Live" };
 
-/** Pick which tool provides a capability: the common ones, or type any other. */
+/** Pick which tool provides a capability: the one they said they use first, the common ones, or type any other. */
 function ToolPicker({
   category,
+  preferred,
   onPick,
   onTyping,
 }: {
   category: IntegrationCategory;
+  /** The tool they told us they use for this, if any. */
+  preferred: string | undefined;
   onPick: (tool: string) => void;
   onTyping: () => void;
 }) {
   const [other, setOther] = useState<string | null>(null);
-  const { need, tools } = integrationCategories[category];
+  const { need } = integrationCategories[category];
+  const tools = [...new Set([...(preferred ? [preferred] : []), ...integrationCategories[category].tools])];
   return (
     <div className="space-y-2">
-      <p className="text-[12px] text-muted">Needs {need}. Which do you use?</p>
+      <p className="text-[12px] text-muted">
+        {preferred ? `Needs ${need}. Connect ${preferred}, or another tool:` : `Needs ${need}. Which do you use?`}
+      </p>
       <div className="flex flex-wrap gap-1.5">
         {tools.map((tool) => (
           <button
             key={tool}
             type="button"
             onClick={() => onPick(tool)}
-            className="rounded-full border border-ink/15 px-2.5 py-1 text-[12px] hover:bg-canvas"
+            className={`rounded-full border px-2.5 py-1 text-[12px] hover:bg-canvas ${tool === preferred ? "border-ink/40" : "border-ink/15"}`}
           >
             {tool}
           </button>
@@ -90,11 +96,11 @@ export function TaskDetails({
   /** Keeps the card open while the user types (it would otherwise close when the pointer leaves). */
   onPin: () => void;
 }) {
-  const { ploys, integrations, mapNodes } = useWorkspace();
+  const { ploys, integrations, mapNodes, docs, workspace } = useWorkspace();
   const router = useRouter();
   const [starting, startTransition] = useTransition();
   const spec = getSpec(node.spec_id);
-  const { state, lockReason, missing } = nodeState(node, { ploys, integrations, mapNodes });
+  const { state, lockReason, missing } = nodeState(node, { ploys, integrations, mapNodes, docs });
   const region = regions.find((r) => r.id === node.region);
 
   const start = () =>
@@ -104,18 +110,16 @@ export function TaskDetails({
     });
 
   return (
-    <div className="w-[308px] space-y-3 rounded-2xl border border-ink/10 bg-white p-4 text-left shadow-[0_16px_40px_rgba(0,0,0,0.16)]">
+    <div className="w-[300px] space-y-3 rounded-2xl border border-ink/10 bg-white p-4 text-left shadow-[0_12px_32px_rgba(0,0,0,0.12)]">
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-[11px]">
-          <span
-            className="rounded-full bg-ink px-2 py-0.5 font-semibold tracking-wide uppercase"
-            style={{ color: regionColors[node.region as RegionId] }}
-          >
+          <span className="flex items-center gap-1.5 text-muted">
+            <span className="size-[7px] rounded-full" style={{ background: regionTheme[node.region as RegionId].dot }} />
             {region?.name}
           </span>
           <span className="text-subtle">Task · {stateLabel[state]}</span>
         </div>
-        <p className="text-[15px] leading-snug font-semibold text-ink">{node.title}</p>
+        <p className="text-[15px] leading-snug font-medium text-ink">{node.title}</p>
       </div>
 
       {node.reason && <p className="text-[12.5px]">{node.reason}</p>}
@@ -123,7 +127,8 @@ export function TaskDetails({
 
       {spec && (
         <div className="flex flex-wrap items-center gap-1.5">
-          {spec.steps.map((step) => (
+          {/* One chip per building block, even when it does several steps. */}
+          {[...new Map(spec.steps.map((s) => [s.kind === "primitive" ? s.primitive : s.tool, s])).values()].map((step) => (
             <span
               key={step.label}
               title={step.label}
@@ -163,7 +168,13 @@ export function TaskDetails({
         (missing.length ? (
           <div className="space-y-3 border-t border-border pt-3">
             {missing.map((category) => (
-              <ToolPicker key={category} category={category} onPick={(tool) => onConnect(category, tool)} onTyping={onPin} />
+              <ToolPicker
+                key={category}
+                category={category}
+                preferred={workspace.entry.tools?.[category]}
+                onPick={(tool) => onConnect(category, tool)}
+                onTyping={onPin}
+              />
             ))}
           </div>
         ) : (

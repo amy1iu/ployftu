@@ -3,12 +3,12 @@
 import { Ellipsis, PanelRight } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { currentUser } from "@/lib/mock-data";
-import { useMapPanel } from "../map/map-panel-state";
+import { useTaskPanel } from "../tasks/task-panel";
 import { Tooltip } from "../tooltip";
 import { useClickOutside } from "../use-click-outside";
 
 export function ChatHeader({ title, actions }: { title: ReactNode; actions?: ReactNode }) {
-  const map = useMapPanel();
+  const panel = useTaskPanel();
   return (
     <header className="flex h-[72px] shrink-0 items-center justify-between gap-3 pr-4 pl-10 sm:pr-[26px]">
       <h1 className="min-w-0 truncate text-[17px]">{title}</h1>
@@ -23,15 +23,15 @@ export function ChatHeader({ title, actions }: { title: ReactNode; actions?: Rea
           </span>
           Share
         </button>
-        {map.available && (
-          <Tooltip label={map.visible ? "Hide map" : "Show map"} side="bottom">
+        {panel.available && !panel.open && (
+          <Tooltip label="Show tasks" side="bottom">
             <button
               type="button"
-              aria-label="Toggle map"
-              onClick={map.toggle}
+              aria-label="Show tasks"
+              onClick={panel.toggle}
               className="flex size-8 items-center justify-center rounded-lg text-[#3a3a3a] hover:bg-hover"
             >
-              <PanelRight size={20} strokeWidth={1.5} className={map.visible ? "fill-[#3a3a3a]/15" : ""} />
+              <PanelRight size={20} strokeWidth={1.5} />
             </button>
           </Tooltip>
         )}

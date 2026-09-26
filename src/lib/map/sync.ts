@@ -1,25 +1,11 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { models } from "@/lib/ai/models";
-import { getSpec, templates, type PloybookSpec } from "@/lib/catalog";
-import { getIntent } from "@/lib/catalog/intents";
-import type { RegionId } from "@/lib/catalog/regions";
+import { getSpec, type PloybookSpec } from "@/lib/catalog";
 import type { Doc, MapNode, Workspace } from "@/lib/db/types";
-import { getDocs, getMapNodes, getPloys, getWorkspace, insertMapNodes } from "@/lib/db/workspaces";
-import { mapFocus, regionSlots } from "./state";
-
-/** Templates for a region, most relevant first: the user's goals, then what their site suggests, then the rest. */
-function rankTemplates(region: RegionId, workspace: Workspace) {
-  const preferred: string[] = [
-    ...workspace.entry.goals.intents.flatMap(({ id }) => getIntent(id).templates),
-    ...(workspace.crawl?.opportunities ?? []).flatMap(({ intent }) => getIntent(intent).templates),
-  ];
-  const rank = (spec: PloybookSpec) => {
-    const i = preferred.indexOf(spec.id);
-    return i === -1 ? preferred.length + templates.indexOf(spec) : i;
-  };
-  return templates.filter((t) => t.region === region).sort((a, b) => rank(a) - rank(b));
-}
+import { getDocs, getIntegrations, getMapNodes, getPloys, getWorkspace, insertMapNodes } from "@/lib/db/workspaces";
+import { anchorFor, plannedTemplates, toolToAsk } from "./plan";
+import { mapFocus } from "./state";
 
 const copySchema = z.object({
   levels: z.array(
@@ -59,16 +45,20 @@ ${specs.map((s) => `- ${s.id}: ${s.name}. ${s.goal}`).join("\n")}`,
 }
 
 async function doSync(workspaceId: string) {
-  const [workspace, docs, ploys, nodes] = await Promise.all([
+  const [workspace, docs, ploys, nodes, integrations] = await Promise.all([
     getWorkspace(workspaceId),
     getDocs(workspaceId),
     getPloys(workspaceId),
     getMapNodes(workspaceId),
+    getIntegrations(workspaceId),
   ]);
   const focus = mapFocus(workspace, ploys);
   const quickWin = ploys.find((p) => p.spec?.source === "quick_win");
   const quickWinDone = quickWin?.status === "done";
   const onMap = new Set(nodes.map((n) => n.spec_id));
+  // Once they've connected a tool, the trail has asked its tool question.
+  const toolCategory = integrations.length ? null : toolToAsk({ workspace, ploys, mapNodes: nodes, integrations });
+  const anchorCtx = { workspace, docs, integrations, toolCategory, quickWinDone };
   // Slots are for levels along a region's path; the first deliverable sits with home base instead.
   const slotsUsed = (region: string) =>
     nodes.filter((n) => n.region === region && getSpec(n.spec_id)?.source === "template").length;
@@ -88,17 +78,14 @@ async function doSync(workspaceId: string) {
       reason: null,
       emphasized: focus.emphasized.includes(spec.region),
       ploy_id: ployId,
+      anchor: anchorFor(spec, anchorCtx),
     });
     onMap.add(spec.id);
   };
 
   // The first deliverable is always on the map, lit up.
   if (quickWin?.spec && !onMap.has(quickWin.spec.id)) add(quickWin.spec, quickWin.id);
-  for (const region of focus.revealed) {
-    const templatesShown = nodes.filter((n) => n.region === region && getSpec(n.spec_id)?.source === "template").length;
-    const wanted = regionSlots(region, focus, quickWinDone) - templatesShown;
-    for (const spec of rankTemplates(region, workspace).filter((t) => !onMap.has(t.id)).slice(0, Math.max(0, wanted))) add(spec, null);
-  }
+  for (const spec of plannedTemplates(workspace, ploys, nodes)) add(spec, null);
   if (!added.length) return;
 
   const newTemplates = added.filter((a) => !a.ploy_id).map((a) => getSpec(a.spec_id)!);

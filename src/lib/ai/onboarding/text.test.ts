@@ -9,3 +9,10 @@ it("matches quotes regardless of case, punctuation, and spacing", () => {
   expect(isQuoted("we use Shopify", said)).toBe(false);
   expect(isQuoted("  ", said)).toBe(false);
 });
+
+it("accepts a quote stitched from excerpts, if every excerpt was said", () => {
+  const said = "I want cold outreach to HR leaders for PeoplePulse, our employee survey software.";
+  expect(isQuoted("PeoplePulse, our employee survey software... cold outreach to HR leaders", said)).toBe(true);
+  expect(isQuoted("PeoplePulse… we sell to banks", said)).toBe(false);
+  expect(isQuoted("...", said)).toBe(false);
+});

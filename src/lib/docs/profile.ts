@@ -1,3 +1,4 @@
+import { contextKeys, type ContextKey } from "@/lib/catalog/context";
 import { renderDoc } from "./markdown";
 
 // The business profile, split into topic Docs (Ploy's convention). Together
@@ -54,6 +55,17 @@ export function getProfileSection(slug: ProfileDocSlug, key: string) {
   const section = doc.sections.find((s) => s.key === key);
   if (!section) throw new Error(`Unknown section ${slug}#${key}`);
   return section;
+}
+
+/** Whether the profile already says this: from their site or their answers, or (`confirmed`) from them. */
+export function hasContext(
+  docs: { slug: string; sections: Record<string, SectionMeta> }[],
+  key: ContextKey,
+  { confirmed = false } = {},
+) {
+  const { doc, section } = contextKeys[key];
+  const status = docs.find((d) => d.slug === doc)?.sections[section]?.status;
+  return confirmed ? status === "confirmed" : !!status && status !== "empty";
 }
 
 export function emptyProfileDocs() {

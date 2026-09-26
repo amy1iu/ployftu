@@ -27,7 +27,8 @@ for (const input of inputs) {
     const [pages, brand] = cached
       ? [cached.pages, cached.brand]
       : await Promise.all([readPages(url, () => {}), readBrand(url).catch(() => null)]);
-    const summary = cached?.summary ?? (await summarizeSite(url, pages));
+    // Re-summarize summaries cached before they had a short label.
+    const summary = cached?.summary?.summary.label ? cached.summary : await summarizeSite(url, pages);
     await cacheSite(url, { pages, brand, summary, pinned: true });
     console.log(`  ✓ ${url}: ${pages.length} pages${brand ? ", branding" : ""} (${((Date.now() - started) / 1000).toFixed(1)}s)`);
   } catch (error) {

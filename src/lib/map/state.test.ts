@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Integration, MapNode, Ploy, Workspace } from "@/lib/db/types";
 import { emptyEntry, type Entry } from "@/lib/onboarding/entry";
+import { profileWith } from "@/test/fixtures";
 import { mapFocus, nodeState, regionSlots } from "./state";
 
 const workspace = (entry: Partial<Entry>, crawl: Workspace["crawl"] = null) =>
@@ -40,9 +41,10 @@ describe("mapFocus", () => {
     expect(focus.emphasized).toEqual(["site_brand", "leads_data"]);
   });
 
-  it("lifts all the fog once the first deliverable is done", () => {
+  it("lifts all the fog once the first deliverable is done and the goal is known", () => {
     const done = { spec: { source: "quick_win" }, status: "done" } as Ploy;
     expect(mapFocus(workspace({ website: site, goals: goal("run_outbound") }), [done]).revealed).toHaveLength(4);
+    expect(mapFocus(workspace({ website: site }), [done]).revealed).toEqual(["site_brand"]);
   });
 });
 
@@ -56,7 +58,7 @@ it("gives emphasized regions more levels", () => {
 describe("nodeState", () => {
   const node = (spec_id: string, ploy_id: string | null = null) => ({ spec_id, ploy_id }) as MapNode;
   const ploy = (id: string, status: Ploy["status"]) => ({ id, status }) as Ploy;
-  const none = { ploys: [], integrations: [], mapNodes: [] };
+  const none = { ploys: [], integrations: [], mapNodes: [], docs: profileWith("offering", "audience", "goal") };
 
   it("follows its ploy", () => {
     expect(nodeState(node("lead_list", "p1"), { ...none, ploys: [ploy("p1", "running")] }).state).toBe("running");
@@ -73,12 +75,25 @@ describe("nodeState", () => {
     expect(nodeState(node("lead_nurture"), { ...none, integrations: outlook }).state).toBe("available");
   });
 
+  it("is locked until the business context it needs is known", () => {
+    expect(nodeState(node("lead_list"), { ...none, docs: profileWith("offering") })).toMatchObject({
+      state: "locked",
+      lockReason: "Needs who you sell to",
+      missingContext: ["audience"],
+    });
+    expect(nodeState(node("lead_list"), none).state).toBe("available");
+  });
+
+  it("asks for context before tools", () => {
+    expect(nodeState(node("cold_outbound"), { ...none, docs: profileWith() }).missingContext).toEqual(["audience"]);
+  });
+
   it("is locked until its prerequisite is done", () => {
     const hubspot = [{ provider: "Attio", category: "crm" } as Integration];
     expect(nodeState(node("crm_sync"), { ...none, integrations: hubspot }).lockReason).toBe(
       'Finish "Build a target account list" first',
     );
-    const prereq = { mapNodes: [node("lead_list", "p1")], ploys: [ploy("p1", "done")] };
+    const prereq = { ...none, mapNodes: [node("lead_list", "p1")], ploys: [ploy("p1", "done")] };
     expect(nodeState(node("crm_sync"), { ...prereq, integrations: hubspot }).state).toBe("available");
   });
 });

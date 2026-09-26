@@ -62,6 +62,8 @@ export type MapNode = {
   reason: string | null;
   emphasized: boolean;
   ploy_id: string | null;
+  /** Where it sits on the Getting Started trail (see Anchor in src/lib/map/plan.ts). */
+  anchor: string | null;
   revealed_at: string;
 };
 
