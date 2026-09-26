@@ -116,16 +116,16 @@ type TrailCase = {
   expect: { answered: boolean; matchedChip?: string | null; offScript: boolean };
 };
 const trailCases: TrailCase[] = [
-  { slot: "followup", question: "Who do you most want to reach out to?", chips: cafes, user: "mostly coffee shops, a few offices too", expect: { answered: true, offScript: false } },
-  { slot: "followup", question: "Who do you most want to reach out to?", chips: cafes, user: "wait, can you also handle my bookkeeping?", expect: { answered: false, offScript: true } },
-  { slot: "followup", question: "Who do you most want to reach out to?", chips: cafes, user: "cafés mainly. also can you run instagram ads?", expect: { answered: true, offScript: true } },
-  { slot: "goal", question: "What do you most want to grow in the next few months?", chips: goals, user: "we want to run google ads", expect: { answered: true, matchedChip: "launch_paid_ads", offScript: false } },
-  { slot: "goal", question: "What do you most want to grow in the next few months?", chips: goals, user: "honestly not sure", expect: { answered: true, matchedChip: "unsure", offScript: false } },
-  { slot: "goal", question: "What do you most want to grow in the next few months?", chips: goals, user: "land more wholesale accounts with cafés", expect: { answered: true, offScript: false } },
+  { slot: "target_customer", question: "Who do you most want to reach out to?", chips: cafes, user: "mostly coffee shops, a few offices too", expect: { answered: true, offScript: false } },
+  { slot: "target_customer", question: "Who do you most want to reach out to?", chips: cafes, user: "wait, can you also handle my bookkeeping?", expect: { answered: false, offScript: true } },
+  { slot: "target_customer", question: "Who do you most want to reach out to?", chips: cafes, user: "cafés mainly. also can you run instagram ads?", expect: { answered: true, offScript: true } },
+  { slot: "goal_detail", question: "What do you most want to grow in the next few months?", chips: goals, user: "we want to run google ads", expect: { answered: true, matchedChip: "launch_paid_ads", offScript: false } },
+  { slot: "goal_detail", question: "What do you most want to grow in the next few months?", chips: goals, user: "honestly not sure", expect: { answered: true, matchedChip: "unsure", offScript: false } },
+  { slot: "goal_detail", question: "What do you most want to grow in the next few months?", chips: goals, user: "land more wholesale accounts with cafés", expect: { answered: true, offScript: false } },
   { slot: "tool", question: "Where do you send email from today?", chips: email, user: "we use gmail for everything", expect: { answered: true, matchedChip: "email:Gmail", offScript: false } },
   { slot: "tool", question: "Where do you send email from today?", chips: email, user: "Zoho Mail", expect: { answered: true, matchedChip: null, offScript: false } },
-  { slot: "quick_win", question: "Want something useful in the next few minutes?", chips: quick, user: "can you check my homepage?", expect: { answered: true, matchedChip: "homepage_audit", offScript: false } },
-  { slot: "quick_win", question: "Want something useful in the next few minutes?", chips: quick, user: "what does this cost?", expect: { answered: false, offScript: true } },
+  { slot: "quick_win_offer", question: "Want something useful in the next few minutes?", chips: quick, user: "can you check my homepage?", expect: { answered: true, matchedChip: "homepage_audit", offScript: false } },
+  { slot: "quick_win_offer", question: "Want something useful in the next few minutes?", chips: quick, user: "what does this cost?", expect: { answered: false, offScript: true } },
 ];
 
 let trailPassed = 0;

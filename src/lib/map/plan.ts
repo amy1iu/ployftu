@@ -1,7 +1,7 @@
 import { getIntent } from "@/lib/catalog/intents";
 import { integrationCategoryIds, type IntegrationCategory } from "@/lib/catalog/integrations";
 import { getSpec, templates, type PloybookSpec } from "@/lib/catalog";
-import type { ContextKey } from "@/lib/catalog/context";
+import { contextKeys, type ContextItemId } from "@/lib/catalog/context";
 import type { RegionId } from "@/lib/catalog/regions";
 import type { Doc, Integration, MapNode, Ploy, Workspace } from "@/lib/db/types";
 import { hasContext } from "@/lib/docs/profile";
@@ -70,18 +70,14 @@ export function toolToAsk({
 }
 
 /**
- * Where a task hangs on the trail: beside the question whose answer it's
- * waiting on, otherwise beside the one that revealed it.
+ * Where a task hangs on the trail: beside the question for the registry item
+ * whose answer it's waiting on, otherwise beside the one that revealed it.
  * - site: the website (or the site-read node)
- * - sell: "what do you sell" (no site)
- * - goal: wherever they answered the goal question
- * - followup: who they sell to
- * - tool: the tool question
+ * - a registry item (business_model, target_customer, tool…): that item's question
+ * - goal_detail: wherever they answered the goal question (the fallback for goal-driven tasks)
  * - build: the first deliverable, and everything revealed once it's done
  */
-export type Anchor = "site" | "sell" | "goal" | "followup" | "tool" | "build";
-
-const contextAnchor: Record<ContextKey, Anchor> = { offering: "sell", audience: "followup", goal: "goal" };
+export type Anchor = "site" | "build" | Exclude<ContextItemId, "website" | "quick_win_offer">;
 
 export function anchorFor(
   spec: PloybookSpec,
@@ -105,13 +101,13 @@ export function anchorFor(
   const [waitingOn] = spec.needsContext.filter((key) => !hasContext(docs, key));
   // Reading their site will fill in what they sell.
   if (waitingOn === "offering" && entry.website.status === "has") return "site";
-  if (waitingOn) return contextAnchor[waitingOn];
+  if (waitingOn) return contextKeys[waitingOn].item;
   if (toolCategory && spec.requires.includes(toolCategory) && !integrations.some((i) => i.category === toolCategory))
     return "tool";
 
   const goalRegions = entry.goals.intents.flatMap(({ id }) => Object.keys(getIntent(id).regions));
   const siteRegions = entry.goals.status === "unsure" ? (crawl?.opportunities ?? []).flatMap(({ intent }) => Object.keys(getIntent(intent).regions)) : [];
-  if (goalRegions.includes(spec.region) || siteRegions.includes(spec.region)) return "goal";
+  if (goalRegions.includes(spec.region) || siteRegions.includes(spec.region)) return "goal_detail";
   if (spec.region === "site_brand") return "site";
-  return quickWinDone ? "build" : "goal";
+  return quickWinDone ? "build" : "goal_detail";
 }

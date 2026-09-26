@@ -22,6 +22,8 @@ export const profileDocs = [
       { key: "goals", heading: "Goals" },
       { key: "focus-areas", heading: "Focus areas" },
       { key: "challenges", heading: "Challenges" },
+      // Added after launch: older workspaces don't have it until it's first written (patchSection appends it).
+      { key: "constraints", heading: "Constraints" },
     ],
   },
   {

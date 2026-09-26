@@ -19,7 +19,7 @@ import { readSection } from "@/lib/docs/markdown";
 import { syncMap } from "@/lib/map/sync";
 import { entryBranch } from "@/lib/onboarding/entry";
 import { greetingMessage } from "@/lib/onboarding/greeting";
-import { answeredSlots, openQuestion, type AnsweredData, type AnsweredSlot, type QuestionData } from "@/lib/onboarding/trail";
+import { answeredSlots, isFork, openQuestion, type AnsweredData, type AnsweredSlot, type QuestionData } from "@/lib/onboarding/trail";
 import { db } from "@/lib/supabase/admin";
 import { personas, type Persona } from "./personas";
 
@@ -88,7 +88,7 @@ Tap a chip when one says what you'd say; otherwise type a short reply (1-2 sente
   // In the app a chip belongs to its card, so find it on either one.
   const altChip = asked.alt?.chips.find((c) => c.label === output.chip);
   const onAlt = altChip ? true : output.card === "quick_win" && !!asked.alt;
-  const slot: AnsweredSlot = asked.slot === "fork" ? (onAlt ? "quick_win" : "goal") : asked.slot;
+  const slot: AnsweredSlot = isFork(asked) && onAlt ? "quick_win_offer" : asked.slot;
   const chip = output.chip ? (altChip ?? asked.chips.find((c) => c.label === output.chip)) : undefined;
   return chip
     ? { text: chip.label, metadata: { slot, value: chip.value } }
@@ -168,8 +168,8 @@ async function runPersona(persona: Persona) {
       const q = part<QuestionData>(m, "data-question");
       if (!q) return;
       const before = answeredSlots(messages.slice(0, i + 1));
-      const slots = q.slot === "fork" ? ["goal", "quick_win"] : [q.slot];
-      questions.push({ slot: q.slot, question: q.question, chips: q.chips.length, reask: slots.some((s) => before.has(s as AnsweredSlot)) });
+      const slots: AnsweredSlot[] = isFork(q) ? [q.slot, "quick_win_offer"] : [q.slot];
+      questions.push({ slot: q.slot, question: q.question, chips: q.chips.length, reask: slots.some((s) => before.has(s)) });
     });
     const answers = messages.flatMap((m) => {
       const a = part<AnsweredData>(m, "data-answered");
@@ -177,7 +177,7 @@ async function runPersona(persona: Persona) {
     });
 
     const quickWin = ploys.find((p) => p.spec?.source === "quick_win");
-    const picked = answers.some((a) => a.slot === "quick_win");
+    const picked = answers.some((a) => a.slot === "quick_win_offer");
     const onMap = nodes.filter((n) => getSpec(n.spec_id)?.source === "template").map((n) => n.spec_id);
     const fit = expectedTemplates(persona, entry.goals.intents[0]?.id);
 
@@ -283,7 +283,7 @@ const metrics = [
   { name: "Cards to finish (median)", value: percentile(cards, 50), max: 5 },
   { name: "Cards to finish (max)", value: Math.max(...cards), max: 6 },
   { name: "Questions of 15 words or fewer", ...rate(allQuestions.map((q) => words(q.question) <= 15)), target: 0.95 },
-  { name: "2-5 chips (or free text by design)", ...rate(allQuestions.map((q) => (q.slot === "sell" ? true : q.chips >= 2 && q.chips <= 5))), target: 0.95 },
+  { name: "2-5 chips (or free text by design)", ...rate(allQuestions.map((q) => (q.slot === "business_model" && q.chips === 0 ? true : q.chips >= 2 && q.chips <= 5))), target: 0.95 },
   { name: "Re-asks an answered question", value: allQuestions.filter((q) => q.reask).length, max: 0 },
   { name: "Answers land in the right doc section", ...rate(ok.flatMap((r) => Object.values(r.docChecks))), target: 0.95 },
   { name: "Answer to next card p50 (ms)", value: Math.round(percentile(nextQuestion, 50)), max: 2000 },

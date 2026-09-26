@@ -5,8 +5,11 @@ import { getSpec } from "@/lib/catalog";
 import type { MapNode, Ploy } from "@/lib/db/types";
 import { nodeState, type NodeState } from "@/lib/map/state";
 import {
+  isFork,
   openQuestion,
   questionFor,
+  questionOf,
+  slotOf,
   type AnsweredData,
   type AnsweredSlot,
   type QuestionData,
@@ -44,11 +47,11 @@ const textOf = (message: OnboardingUIMessage) =>
 const partOf = <T,>(message: OnboardingUIMessage | undefined, type: string) =>
   (message?.parts.find((p) => p.type === type) as { data: T } | undefined)?.data;
 
-/** Where a question's tasks sit: the fork's are the goal's. */
-const questionKey = (q: QuestionData) => (q.slot === "fork" ? "goal" : q.slot);
+/** Where a question's tasks sit (the fork's are the goal's): its registry item. */
+const questionKey = (q: QuestionData) => q.slot;
 /** The card an answer was given on: the fork has two. */
 const cardFor = (q: QuestionData | null, slot: AnsweredSlot): Card | null =>
-  q?.slot === "fork" && slot === "quick_win" ? q.alt : q;
+  q && isFork(q) && slot === "quick_win_offer" ? q.alt : q;
 const metaOf = (m: OnboardingUIMessage | undefined) => (m?.metadata ?? {}) as TrailMetadata;
 
 /** The trail's rows, in order, from the Getting Started messages. */
@@ -60,6 +63,8 @@ export function buildRows(
   // Each slot's row, so a changed answer updates in place.
   const answeredAt = new Map<AnsweredSlot, number>();
   const open = openQuestion(messages);
+  // Where it was asked (saved questions are normalized copies, so compare by position).
+  const openAt = open ? messages.findLastIndex((m) => m.role === "assistant" && !!partOf<QuestionData>(m, "data-question")) : -1;
   const last = messages.at(-1);
   // Changing an earlier answer leaves the card on screen where it is.
   const redoing = last?.role === "user" && !!metaOf(last).redo;
@@ -72,7 +77,7 @@ export function buildRows(
       if (reply && textOf(reply)) return; // shown in the reply node
       // Waiting on the reply: show the answer as pending.
       const meta = metaOf(message);
-      const slot = meta.slot ?? (asked && (asked.slot === "fork" ? "goal" : asked.slot));
+      const slot = meta.slot ? slotOf(meta.slot) : asked?.slot;
       const existing = meta.redo && slot ? answeredAt.get(slot) : undefined;
       if (existing !== undefined) rows[existing] = { ...(rows[existing] as Extract<Row, { kind: "answered" }>), summary: textOf(message), pending: true };
       else if (asked && slot)
@@ -81,7 +86,8 @@ export function buildRows(
       return;
     }
 
-    const answered = partOf<AnsweredData>(message, "data-answered");
+    const saved = partOf<AnsweredData>(message, "data-answered");
+    const answered = saved && { ...saved, slot: slotOf(saved.slot) };
     if (answered) {
       const from = messages[i - 1];
       const meta = metaOf(from);
@@ -105,9 +111,10 @@ export function buildRows(
     const started = partOf<TaskStartedData>(message, "data-taskStarted");
     if (started && quickWin) rows.push({ kind: "build", key: "build", ploy: quickWin });
 
-    const question = partOf<QuestionData>(message, "data-question");
+    const savedQuestion = partOf<QuestionData>(message, "data-question");
+    const question = savedQuestion && questionOf(savedQuestion);
     const text = textOf(message);
-    const isOpen = !!question && question === open && (i === messages.length - 1 || redoing);
+    const isOpen = !!question && i === openAt && (i === messages.length - 1 || redoing);
     // A greeting, or a note about their answer, leads into the question; a reply to something off-script stands alone.
     const lead = text && isOpen && (i === 0 || !question.offScript) ? text : null;
     // The greeting only introduces the first question.
@@ -145,7 +152,8 @@ export function useTrailLayout(messages: OnboardingUIMessage[], busy: boolean) {
   const byRow = new Map<string, MapNode[]>();
   for (const node of mapNodes) {
     if (getSpec(node.spec_id)?.source === "quick_win") continue; // shown as the build node
-    const anchor = node.anchor ?? (node.region === "site_brand" ? "site" : "goal");
+    // Anchors written before the registry use the old slot names.
+    const anchor = node.anchor ? slotOf(node.anchor) : node.region === "site_brand" ? "site" : "goal_detail";
     const key = keys.has(anchor) ? anchor : done ? "end" : null;
     if (key) byRow.set(key, [...(byRow.get(key) ?? []), node]);
   }

@@ -10,8 +10,8 @@ import { createTaskPloy } from "@/lib/tasks/ploy";
 /**
  * On the goal path, the first deliverable starts once the goal is set and we
  * know what it needs (e.g. who they sell to), or they've answered the
- * follow-up either way. (On the quick-win path they pick it themselves.)
- * Returns the recipe to start this turn, or null.
+ * target_customer question either way ("not sure" included). (On the
+ * quick-win path they pick it themselves.) Returns the recipe to start this turn, or null.
  */
 export function quickWinToStart({
   workspace,
@@ -31,7 +31,7 @@ export function quickWinToStart({
   const waiting = quickWins[recipe].spec.needsContext.some(
     (key) => !hasContext(docs, key, { confirmed: key === "audience" }),
   );
-  return !waiting || answered.has("followup") ? recipe : null;
+  return !waiting || answered.has("target_customer") ? recipe : null;
 }
 
 function whyThisFirst(entry: Entry, recipeId: QuickWinId, picked: boolean) {

@@ -10,7 +10,8 @@ import { getDocs, getWorkspace, patchProfileSections, updateWorkspace } from "@/
 import { EMPTY_SECTION, readSection } from "@/lib/docs/markdown";
 import { normalizeUrl } from "./entry";
 import { applyEntryUpdate, type EntryUpdate } from "./set-entry";
-import { soundsUnsure, type AnsweredSlot, type Chip, type QuestionData, type TrailMetadata } from "./trail";
+import { contextItems, type SectionRef } from "@/lib/catalog/context";
+import { isFork, slotOf, soundsUnsure, type AnsweredSlot, type Chip, type QuestionData, type TrailMetadata } from "./trail";
 
 export type AppliedAnswer = {
   /** The slot it answered, or null if it didn't answer the question. */
@@ -39,10 +40,9 @@ function goalUpdate(value: string): EntryUpdate {
   };
 }
 
-const saveAudience = (workspaceId: string, body: string) =>
-  patchProfileSections(workspaceId, [
-    { slug: "business-overview", key: "who-we-serve", body, status: "confirmed", source: "user" },
-  ]);
+/** Records an answer in the registry item's profile section (who they serve, channels, constraints…), as theirs. */
+const saveSection = (workspaceId: string, { doc, section }: SectionRef, body: string) =>
+  patchProfileSections(workspaceId, [{ slug: doc, key: section, body, status: "confirmed", source: "user" }]);
 
 /**
  * Records the tool they use for a capability: on the workspace (so Connect can
@@ -78,16 +78,18 @@ async function applyChip(
     case "website":
       await applyEntryUpdate(workspace.id, { ...none, website: { status: chip.value as "none" | "not_live", url: null } }, { userTurns });
       return { ...answer, summary: chip.value === "none" ? "No site yet" : "Not live yet" };
-    case "sell":
+    case "business_model":
       await applyEntryUpdate(workspace.id, { ...none, business: { whatTheyDo: chip.label, whoTheyServe: null } }, { userTurns });
       return answer;
-    case "goal":
+    case "goal_detail":
       await applyEntryUpdate(workspace.id, goalUpdate(chip.value), { userTurns });
       return answer;
-    case "quick_win":
+    case "quick_win_offer":
       return { ...answer, quickWin: chip.value as QuickWinId };
-    case "followup":
-      if (chip.value !== "unsure") await saveAudience(workspace.id, chip.label);
+    case "target_customer":
+    case "current_acquisition":
+    case "constraints":
+      if (chip.value !== "unsure") await saveSection(workspace.id, contextItems[slot].record!, chip.label);
       return answer;
     case "tool": {
       if (chip.value === "skip") return { ...answer, summary: "Skipped for now" };
@@ -117,8 +119,8 @@ export async function applyAnswer({
   userTurns: number;
 }): Promise<AppliedAnswer> {
   const meta = (message.metadata ?? {}) as TrailMetadata;
-  const slot: AnsweredSlot = asked.slot === "fork" ? (meta.slot === "quick_win" ? "quick_win" : "goal") : asked.slot;
-  const card = slot === "quick_win" && asked.alt ? asked.alt : asked;
+  const slot: AnsweredSlot = isFork(asked) && meta.slot && slotOf(meta.slot) === "quick_win_offer" ? "quick_win_offer" : asked.slot;
+  const card = slot === "quick_win_offer" && asked.alt ? asked.alt : asked;
 
   const chip = meta.value !== undefined ? card.chips.find((c) => c.value === meta.value) : undefined;
   // A bare URL for the website needs no model to read.
@@ -182,26 +184,33 @@ async function applyTyped(
       if (website.status === "has" && website.url) return answeredWith(hostOf(website.url));
       return answeredWith(website.status === "none" ? "No site yet" : website.status === "not_live" ? "Not live yet" : summary);
     }
-    case "sell":
+    case "business_model":
       return update.business?.whatTheyDo ? answeredWith(answer?.summary ?? update.business.whatTheyDo) : result;
-    case "goal":
+    case "goal_detail":
       if (update.goals) return answeredWith(update.goals.status === "unsure" ? "Not sure yet" : summary);
       if (matched) {
         await applyEntryUpdate(workspace.id, goalUpdate(matched.value), { userTurns });
         return answeredWith();
       }
       return result;
-    case "quick_win":
+    case "quick_win_offer":
       return matched ? { ...answeredWith(), quickWin: matched.value as QuickWinId } : result;
-    case "followup": {
+    case "target_customer": {
       // "All of the above" / "both" means every suggestion on the card.
       const all = /\b(all of (the|them|those|these)|all (the )?above|every(one|body) (above|listed)|both)\b/i.test(text)
         ? card.chips.filter((c) => c.value !== "unsure").map((c) => c.label).join(", ")
         : null;
       const who = update.business?.whoTheyServe ?? all ?? (gaveAnswer ? (answer?.summary ?? text) : null);
       if (!who) return soundsUnsure(text) ? answeredWith("Not sure yet") : result;
-      if (!update.business?.whoTheyServe) await saveAudience(workspace.id, who);
+      if (!update.business?.whoTheyServe) await saveSection(workspace.id, contextItems.target_customer.record!, who);
       return all ? answeredWith(all) : answeredWith();
+    }
+    // The other open items: their words, summarized, into the item's section.
+    case "current_acquisition":
+    case "constraints": {
+      if (!gaveAnswer) return soundsUnsure(text) ? answeredWith("Not sure yet") : result;
+      await saveSection(workspace.id, contextItems[slot].record!, matched?.label ?? text);
+      return answeredWith();
     }
     case "tool": {
       if (!gaveAnswer && !matched && !soundsUnsure(text)) return result;

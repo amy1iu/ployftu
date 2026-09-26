@@ -94,7 +94,7 @@ try {
   await syncMap(second.id);
   const secondNodes = await getMapNodes(second.id);
   const list = secondNodes.find((n) => n.spec_id === "lead_list")!;
-  check("A task needing who they sell to hangs off the follow-up", list?.anchor === "followup", list?.anchor ?? "missing");
+  check("A task needing who they sell to hangs off the target_customer question", list?.anchor === "target_customer", list?.anchor ?? "missing");
   const secondState = async () =>
     nodeState(list, { ploys: [], integrations: [], mapNodes: secondNodes, docs: await getDocs(second.id) });
   check("…and is locked until they answer it", (await secondState()).lockReason === "Needs who you sell to");

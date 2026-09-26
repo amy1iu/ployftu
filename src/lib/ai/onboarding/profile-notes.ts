@@ -14,6 +14,7 @@ const noteSections = [
   ["business-overview", "who-we-serve", "who their customers are"],
   ["business-overview", "differentiators", "what makes them different from competitors"],
   ["goals-and-focus", "challenges", "problems or frustrations with marketing and growth"],
+  ["goals-and-focus", "constraints", "limits on budget, time, team, or compliance that rule things in or out"],
   ["channels-and-tools", "acquisition", "how customers find them today (channels)"],
   ["channels-and-tools", "outreach", "how they reach out to or follow up with prospects today"],
   ["channels-and-tools", "tools", "software and services they use (CRM, email, store, ads, analytics)"],
@@ -55,7 +56,7 @@ export async function recordProfileNotes(workspaceId: string, messages: UIMessag
     const current = noteSections
       .map(([slug, key, meaning]) => {
         const doc = docs.find((d) => d.slug === slug);
-        return `### ${slug}#${key}: ${meaning}\n${doc ? readSection(doc.content_md, getProfileSection(slug, key).heading) : ""}`;
+        return `### ${slug}#${key}: ${meaning}\n${doc ? (readSection(doc.content_md, getProfileSection(slug, key).heading) ?? "") : ""}`;
       })
       .join("\n\n");
     const { output } = await generateText({
