@@ -6,6 +6,7 @@ import { syncMap } from "@/lib/map/sync";
 import { runQuickWin } from "@/lib/quick-wins/run";
 import { quickWinToStart, startQuickWin } from "@/lib/quick-wins/start";
 import { knownItems, type ContextItemId } from "@/lib/catalog/context";
+import { normalizeUrl } from "@/lib/onboarding/entry";
 import { applyAnswer, type AppliedAnswer } from "@/lib/onboarding/answer";
 import {
   decisionIds,
@@ -252,7 +253,8 @@ async function startDecisions({
   const inPlay = new Set<Decision>((shadow ? decisionIds : [...decisions]).filter((d) => d !== "next_info"));
   const previous = messages.findLast((m) => m.role === "assistant");
   const input: TurnInput | null =
-    latest && asked && !tapped && message
+    // Chip taps and a bare URL for the website are read exactly, with no model.
+    latest && asked && !tapped && message && !(asked.slot === "website" && normalizeUrl(message))
       ? {
           item: asked.slot,
           question: asked.question,

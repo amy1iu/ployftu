@@ -256,7 +256,7 @@ export function questionForItem(item: ContextItemId, state: TrailState): NextQue
     }
     case "goal_detail":
     case "quick_win_offer": {
-      if (state.workspace.entry.goals.status === "unknown") return goalQuestion(state, "");
+      if (state.workspace.entry.goals.status === "unknown") return goalQuestion(state, hasQuickWin(state) ? "While that builds: " : "");
       if (hasQuickWin(state)) return null;
       const { question, hint, chips } = goalQuestion({ ...state, answered: new Set() }, "").alt!;
       return { ...base, slot: "quick_win_offer", question, hint, chips, guide: "Offer a quick win." };
