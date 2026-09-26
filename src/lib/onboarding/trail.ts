@@ -180,9 +180,10 @@ export type PlannedCard = {
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 /**
- * The model's chips mapped onto fixed options: "2. Get more demo bookings"
- * (option 2, relabeled) or an option's label. Anything else is dropped; with
- * fewer than two left, all the options show as they are.
+ * The model's chips mapped onto fixed options, by number ("2. Get more
+ * leads") or label. The option's own label always shows: in evals Haiku
+ * relabeled a quick win "Skip for now", which would have started it. Anything
+ * else is dropped; with fewer than two left, all the options show.
  */
 export function pickChips(options: Chip[], wanted: string[]): Chip[] {
   const picked: Chip[] = [];
@@ -191,7 +192,7 @@ export function pickChips(options: Chip[], wanted: string[]): Chip[] {
     const text = (numbered ? numbered[2] : raw).trim();
     const option = (numbered && options[Number(numbered[1]) - 1]) || options.find((o) => norm(o.label) === norm(text));
     if (!option || picked.some((p) => p.value === option.value)) continue;
-    picked.push({ label: text || option.label, value: option.value });
+    picked.push(option);
   }
   return picked.length >= 2 ? picked : options;
 }

@@ -125,8 +125,8 @@ function readiness(state: TrailState) {
     !contextItems.quick_win_offer.known(state) && "a running quick win",
   ].filter(Boolean);
   return missing.length
-    ? `Not ready to finish. Still needed: ${missing.join(", ")}.`
-    : "READY TO FINISH: their goal and who they want to reach are in, and their first deliverable is running. Set next to null now.";
+    ? { done: false, text: `Not ready to finish. Still needed: ${missing.join(", ")}.` }
+    : { done: true, text: "READY TO FINISH: their goal and who they want to reach are in, and their first deliverable is running. Set next to null now." };
 }
 
 /** Their first deliverable: running, picked, or what starts on its own once we know enough. */
@@ -192,9 +192,12 @@ export function buildTrailPrompt({
   planning: boolean;
 }) {
   const left = MAX_ANSWERED - state.answered.size;
-  const next = planning
-    ? `the next card, or null to finish. At most ${left} more answer${left === 1 ? "" : "s"} fit on the trail.`
-    : "null (the app puts up the next card itself).";
+  const ready = readiness(state);
+  const next = !planning
+    ? "null (the app puts up the next card itself)."
+    : ready.done
+      ? "null. The trail has what it needs (see Where the trail stands): finish now. Only if their latest message asks for more questions, the next card."
+      : `the next card, or null to finish. At most ${left} more answer${left === 1 ? "" : "s"} fit on the trail.`;
 
   return `You are Ploy's onboarding guide. Ploy is a marketing platform: it builds on-brand sites and content, and runs growth automations (Ploybooks) made of building blocks called primitives.
 The user is on Getting Started: a short trail of question cards, each answerable in under a minute by tapping a chip or typing. Each answer unlocks tasks on their growth map. You run the trail: each turn you reply to what they said (if needed) and choose the next card, or finish.
@@ -205,7 +208,7 @@ The user is on Getting Started: a short trail of question cards, each answerable
   - item: the item the card asks about (from Open, or Inferred to confirm).
   - question: one plain sentence, 15 words or fewer, ending in "?", specific to their business. No lead-in pleasantries.
   - hint: what answering unlocks for them, 8 words or fewer, or null.
-  - chips: items with Options: pick 2-4, written as "<option number>. <label>" (you may reorder, and tailor a label's wording to them, keeping its meaning). Other items: always 2-3 short answers (1-4 words) specific to their business, like "Independent cafés"; never generic, never empty. "Not sure yet" is added for you.
+  - chips: items with Options: pick 2-4, written as "<option number>. <label>", copied exactly, in the order that fits them best. business_model with nothing known about their business: [] (they type it). Other items: always 2-3 short answers (1-4 words) specific to their business, like "Independent cafés"; never generic, never empty. "Not sure yet" is added for you.
   - alt: a quick-win card offered beside this one (the fork: "a quick win now, or tell me your goal"). Only while quick_win_offer is Open; otherwise null. Keep it light: a short question, hint null, and chips [] to show quick_win_offer's Options as they are (or pick from them).
 
 # How to plan
@@ -224,7 +227,7 @@ The user is on Getting Started: a short trail of question cards, each answerable
 - Never say a tool is connected or that Ploy has access to one. Naming a tool only tells Ploy what they use; they connect it themselves, and approve the access, from a task that needs it.
 
 # Where the trail stands
-${readiness(state)}
+${ready.text}
 
 ${describeItems(state, docs)}
 

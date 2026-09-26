@@ -108,11 +108,8 @@ describe("pickChips", () => {
     { label: "Launch paid ads", value: "launch_paid_ads" },
   ];
 
-  it("maps numbered picks to their option, keeping the model's wording", () => {
-    expect(pickChips(options, ["3. Google Ads for more jobs", "1. Get more leads"])).toEqual([
-      { label: "Google Ads for more jobs", value: "launch_paid_ads" },
-      { label: "Get more leads", value: "get_more_leads" },
-    ]);
+  it("maps numbered picks to their option, with the option's own label", () => {
+    expect(pickChips(options, ["3. Google Ads for more jobs", "1. Skip for now"])).toEqual([options[2], options[0]]);
   });
 
   it("maps by label, and drops anything that isn't an option", () => {
@@ -154,7 +151,7 @@ describe("toQuestion", () => {
     expect(unmatched?.chips.map((c) => c.value)).toEqual(["convert_site_visitors", "get_more_leads", "run_outbound", "launch_paid_ads", "unsure"]);
     const picked = toQuestion(planned({ item: "goal_detail", chips: ["2. More demo bookings", "1. Convert more site visitors"] }), s);
     expect(picked?.chips).toEqual([
-      { label: "More demo bookings", value: "get_more_leads" },
+      { label: "Get more leads", value: "get_more_leads" },
       { label: "Convert more site visitors", value: "convert_site_visitors" },
       { label: "Not sure yet", value: "unsure" },
     ]);
