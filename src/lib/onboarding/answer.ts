@@ -1,14 +1,28 @@
 import type { UIMessage } from "ai";
 import type { IntentId } from "@/lib/catalog/intents";
 import type { QuickWinId } from "@/lib/catalog/quick-wins";
-import { extractEntryUpdate } from "@/lib/ai/onboarding/extract";
+import { extractEntryUpdate, extractFreeText, type FreeText } from "@/lib/ai/onboarding/extract";
 import { textOf } from "@/lib/ai/onboarding/text";
 import { logEvent } from "@/lib/db/events";
 import type { Workspace } from "@/lib/db/types";
 import { integrationCategories, type IntegrationCategory } from "@/lib/catalog/integrations";
 import { getDocs, getWorkspace, patchProfileSections, updateWorkspace } from "@/lib/db/workspaces";
 import { EMPTY_SECTION, readSection } from "@/lib/docs/markdown";
-import { normalizeUrl } from "./entry";
+import {
+  ACT,
+  CONFIRM,
+  chipsOf,
+  hasAside,
+  readChip,
+  readGoal,
+  readStatus,
+  readWebsite,
+  saysGoal,
+  type Answers,
+  type Decision,
+  type GoalRead,
+} from "./decisions";
+import { findUrl, normalizeUrl } from "./entry";
 import { applyEntryUpdate, type EntryUpdate } from "./set-entry";
 import { contextItems, type SectionRef } from "@/lib/catalog/context";
 import { isFork, slotOf, soundsUnsure, type AnsweredSlot, type Chip, type QuestionData, type TrailMetadata } from "./trail";
@@ -24,7 +38,12 @@ export type AppliedAnswer = {
   quickWin: QuickWinId | null;
   /** Why an answer couldn't be recorded (e.g. a URL that isn't one), for the reply. */
   problems: string[];
+  /** What we recorded from a reading we're only fairly sure of, for the reply to confirm back. */
+  confirm?: string | null;
 };
+
+/** Jev's answers about the typed message (see ai/jev.ts), and which decisions it makes for real. */
+export type Decided = { answers: Promise<Answers | null>; decisions: ReadonlySet<Decision> };
 
 const none: EntryUpdate = { website: null, goals: null, business: null };
 
@@ -111,12 +130,15 @@ export async function applyAnswer({
   message,
   messages,
   userTurns,
+  decided = null,
 }: {
   workspace: Workspace;
   asked: QuestionData;
   message: UIMessage;
   messages: UIMessage[];
   userTurns: number;
+  /** With `answer_status` on, a typed answer is read from these instead of the extractor. */
+  decided?: Decided | null;
 }): Promise<AppliedAnswer> {
   const meta = (message.metadata ?? {}) as TrailMetadata;
   const slot: AnsweredSlot = isFork(asked) && meta.slot && slotOf(meta.slot) === "quick_win_offer" ? "quick_win_offer" : asked.slot;
@@ -125,12 +147,15 @@ export async function applyAnswer({
   const chip = meta.value !== undefined ? card.chips.find((c) => c.value === meta.value) : undefined;
   // A bare URL for the website needs no model to read.
   const url = slot === "website" && !chip ? normalizeUrl(textOf(message)) : null;
-  const result = chip
-    ? await applyChip(workspace, slot, chip, userTurns)
-    : url
-      ? await applyUrl(workspace, url, userTurns)
-      : await applyTyped(workspace, slot, card, asked, message, messages, userTurns);
-  if (result.slot) await logEvent(workspace.id, "question_answered", { slot: result.slot, via: chip ? "chip" : "typed" });
+  let via = chip ? "chip" : url ? "url" : "typed";
+  const typed = async () => {
+    const answers = decided?.decisions.has("answer_status") ? await decided.answers : null;
+    const read = answers && (await applyDecided({ workspace, slot, asked, text: textOf(message), answers, decisions: decided!.decisions, userTurns }));
+    if (read) via = "jev";
+    return read ?? (await applyTyped(workspace, slot, card, asked, message, messages, userTurns));
+  };
+  const result = chip ? await applyChip(workspace, slot, chip, userTurns) : url ? await applyUrl(workspace, url, userTurns) : await typed();
+  if (result.slot) await logEvent(workspace.id, "question_answered", { slot: result.slot, via });
   return result;
 }
 
@@ -220,6 +245,158 @@ async function applyTyped(
       const tool = matched ? matched.value.split(":")[1] : (answer?.summary ?? text).slice(0, 40);
       await rememberTool(workspace.id, category, tool);
       return answeredWith(`Uses ${tool}`);
+    }
+  }
+}
+
+const noText: FreeText = { goalInWords: null, whatTheyDo: null, whoTheyServe: null, summary: null };
+
+async function applyGoal(workspaceId: string, goal: Extract<GoalRead, { status: "has" }>, words: FreeText, userTurns: number) {
+  await applyEntryUpdate(
+    workspaceId,
+    { ...none, goals: { status: "has", intents: goal.intents, inUserWords: words.goalInWords, unmatched: null } },
+    { userTurns },
+  );
+}
+
+/**
+ * A typed answer read from Jev's decisions instead of the extractor: what the
+ * message does (answer_status), which chip it means (chip_match), the website
+ * status and goal it states. Only free text (their goal in their words, what
+ * they sell, a pill summary) still needs a model, and only when there's an
+ * answer to copy it from. Returns null to fall back to the extractor: a
+ * reading under CONFIRM, a changed earlier answer (the extractor re-reads the
+ * whole conversation), or a decision this slot needs that isn't switched on.
+ * Between CONFIRM and ACT it records the answer and asks the reply to confirm it.
+ */
+async function applyDecided({
+  workspace,
+  slot,
+  asked,
+  text,
+  answers,
+  decisions,
+  userTurns,
+}: {
+  workspace: Workspace;
+  slot: AnsweredSlot;
+  asked: QuestionData;
+  text: string;
+  answers: Answers;
+  decisions: ReadonlySet<Decision>;
+  userTurns: number;
+}): Promise<AppliedAnswer | null> {
+  const status = readStatus(answers);
+  if (!status || status.confidence < CONFIRM || status.value === "changed_earlier_answer") return null;
+  const chips = chipsOf(asked);
+  const chipRead = decisions.has("chip_match") ? readChip(answers, chips) : null;
+  const chip = chipRead && chipRead.confidence >= CONFIRM ? chipRead.value : null;
+  const goalRead = decisions.has("goal_intent") ? readGoal(answers) : null;
+  const goal = goalRead && goalRead.confidence >= CONFIRM ? goalRead.value : null;
+  const card = { question: asked.question, chips: asked.chips };
+  const words = () => extractFreeText(text, { slot, ...card }).catch(() => noText);
+
+  const result: AppliedAnswer = { slot: null, summary: null, offScript: hasAside(answers) ? text : null, quickWin: null, problems: [], confirm: null };
+  const sure = Math.min(status.confidence, chipRead?.confidence ?? 1) >= ACT && status.value !== "partial";
+  const answeredWith = (summary: string, extra: Partial<AppliedAnswer> = {}): AppliedAnswer => ({
+    ...result,
+    slot,
+    summary,
+    confirm: sure ? null : summary,
+    ...extra,
+  });
+
+  // A goal stated in passing (e.g. under the website question) is recorded, as the extractor would.
+  if (slot !== "goal_detail" && workspace.entry.goals.status === "unknown" && goal?.status === "has" && saysGoal(answers))
+    await applyGoal(workspace.id, goal, await words(), userTurns);
+
+  const pickedChip = chip && chip !== "all" ? chip : null;
+  const onAlt = !!pickedChip && !!asked.alt?.chips.includes(pickedChip);
+  if (status.value === "off_script" || status.value === "asked_question") {
+    // Asking for one of the chips ("can you check my homepage?") picks it.
+    if (!pickedChip) return { ...result, offScript: text };
+  }
+  if (status.value === "unsure") {
+    switch (slot) {
+      case "website":
+      case "quick_win_offer":
+        return result;
+      case "goal_detail":
+        await applyEntryUpdate(workspace.id, goalUpdate("unsure"), { userTurns });
+        return answeredWith("Not sure yet");
+      case "tool":
+        return answeredWith("Skipped for now");
+      default:
+        return answeredWith("Not sure yet");
+    }
+  }
+
+  // Answered (or partly): record it where the slot's answers go.
+  if (onAlt) return { ...answeredWith(pickedChip.label), slot: "quick_win_offer", quickWin: pickedChip.value as QuickWinId };
+  switch (slot) {
+    case "website": {
+      const site = pickedChip ? { value: pickedChip.value as "none" | "not_live", confidence: 1 } : decisions.has("website_status") ? readWebsite(answers) : null;
+      if (!site || site.confidence < CONFIRM) return null;
+      if (site.value !== "has") {
+        await applyEntryUpdate(workspace.id, { ...none, website: { status: site.value, url: null } }, { userTurns });
+        return answeredWith(site.value === "none" ? "No site yet" : "Not live yet");
+      }
+      const url = findUrl(text);
+      if (!url) return { ...result, problems: [`There's no link in what they wrote. Ask for their website's address; don't record anything.`] };
+      const applied = await applyUrl(workspace, url, userTurns);
+      return applied.slot ? { ...applied, offScript: result.offScript, confirm: sure ? null : applied.summary } : applied;
+    }
+    case "goal_detail": {
+      if (pickedChip) {
+        await applyEntryUpdate(workspace.id, goalUpdate(pickedChip.value), { userTurns });
+        return answeredWith(pickedChip.label);
+      }
+      if (!goal) return null;
+      if (goal.status === "unsure") {
+        await applyEntryUpdate(workspace.id, goalUpdate("unsure"), { userTurns });
+        return answeredWith("Not sure yet");
+      }
+      const said = await words();
+      if (goal.status === "not_covered") {
+        // Something Ploy doesn't do isn't a goal: note it, reply, and ask again.
+        const unmatched = said.goalInWords ?? text.slice(0, 80);
+        await updateWorkspace(workspace.id, { entry: { ...workspace.entry, goals: { ...workspace.entry.goals, unmatched } } });
+        await logEvent(workspace.id, "unmatched_intent", { text: unmatched });
+        return { ...result, offScript: text };
+      }
+      await applyGoal(workspace.id, goal, said, userTurns);
+      return answeredWith(said.summary ?? said.goalInWords ?? text.slice(0, 40));
+    }
+    case "quick_win_offer":
+      return pickedChip ? answeredWith(pickedChip.label, { quickWin: pickedChip.value as QuickWinId }) : result;
+    case "tool": {
+      if (pickedChip?.value === "skip") return answeredWith("Skipped for now");
+      const name = pickedChip ? pickedChip.value.split(":")[1] : ((await words()).summary ?? text).slice(0, 40);
+      await rememberTool(workspace.id, asked.category!, name);
+      return answeredWith(`Uses ${name}`);
+    }
+    case "business_model": {
+      const said = pickedChip ? { ...noText, whatTheyDo: pickedChip.label } : await words();
+      const whatTheyDo = said.whatTheyDo ?? text;
+      await applyEntryUpdate(workspace.id, { ...none, business: { whatTheyDo, whoTheyServe: null } }, { userTurns });
+      return answeredWith(said.summary ?? whatTheyDo.slice(0, 40));
+    }
+    default: {
+      // target_customer, current_acquisition, constraints: their words into the item's section.
+      const record = contextItems[slot].record!;
+      if (pickedChip?.value === "unsure") return answeredWith("Not sure yet");
+      if (chip === "all") {
+        const all = asked.chips.filter((c) => c.value !== "unsure").map((c) => c.label).join(", ");
+        await saveSection(workspace.id, record, all);
+        return answeredWith(all);
+      }
+      if (pickedChip) {
+        await saveSection(workspace.id, record, pickedChip.label);
+        return answeredWith(pickedChip.label);
+      }
+      const said = await words();
+      await saveSection(workspace.id, record, (slot === "target_customer" && said.whoTheyServe) || text);
+      return answeredWith(said.summary ?? text.slice(0, 40));
     }
   }
 }

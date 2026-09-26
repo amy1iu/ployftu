@@ -82,6 +82,17 @@ export function normalizeUrl(raw: string): string | null {
   }
 }
 
+/** The first link in a sentence ("My site is acme,com." → https://acme.com), or null. Email addresses don't count. */
+export function findUrl(text: string): string | null {
+  for (const word of text.split(/\s+/)) {
+    const token = word.replace(/^[("'<]+|[)"'>.,!?;:]+$/g, "");
+    if (!token || token.includes("@")) continue;
+    const url = normalizeUrl(token);
+    if (url) return url;
+  }
+  return null;
+}
+
 /** "https://www.acme-labs.com/x" → "Acme Labs" */
 export function nameFromUrl(url: string): string {
   const host = new URL(url).hostname.replace(/^www\./, "");

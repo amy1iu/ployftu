@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultQuickWin, emptyEntry, entryBranch, nameFromUrl, normalizeUrl, type Entry } from "./entry";
+import { defaultQuickWin, emptyEntry, entryBranch, findUrl, nameFromUrl, normalizeUrl, type Entry } from "./entry";
 
 const entry = (website: Entry["website"]["status"], goals: Entry["goals"]["status"], intent?: string): Entry => ({
   website: { status: website, url: website === "has" ? "https://acme.com" : null },
@@ -57,4 +57,17 @@ describe("normalizeUrl", () => {
 
 it("names a workspace from its URL", () => {
   expect(nameFromUrl("https://www.acme-labs.com/x")).toBe("Acme Labs");
+});
+
+describe("findUrl", () => {
+  it.each([
+    ["My website is brightsmile-dental.com.", "https://brightsmile-dental.com"],
+    ["It's greenleaf-landscaping,com.", "https://greenleaf-landscaping.com"],
+    ["I sell on Etsy: etsy.com/shop/wildthreadco.", "https://etsy.com/shop/wildthreadco"],
+    ["(see acme.io)", "https://acme.io"],
+  ])("%s → %s", (text, url) => expect(findUrl(text)).toBe(url));
+
+  it.each(["still building it", "email me at amy@acme.com", "It's not live yet."])("finds none in %j", (text) => {
+    expect(findUrl(text)).toBeNull();
+  });
 });

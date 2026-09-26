@@ -28,6 +28,8 @@ export type Said = {
   answered: boolean;
   offScript: string | null;
   problems: string[];
+  /** Recorded from a reading we're only fairly sure of: say it back so they can correct it. */
+  confirm?: string | null;
 };
 
 function messageRule(next: NextQuestion | null, said: Said | null) {
@@ -35,6 +37,8 @@ function messageRule(next: NextQuestion | null, said: Said | null) {
     return "They've finished the setup questions and are chatting freely. Answer what they said in under 70 words, statements only.";
   if (said?.offScript)
     return `They said something the question isn't about: "${said.offScript}". Reply to it in 1-2 sentences, statements only.${said.answered ? " They also answered the question; don't mention that." : ""}`;
+  if (said?.answered && said.confirm)
+    return `We recorded their answer as "${said.confirm}", but we're not fully sure we read it right. Say it back in one short sentence (e.g. "Got it: ${said.confirm}."), statements only.`;
   if (said && !said.answered)
     return said.problems.length
       ? `Their answer couldn't be recorded: ${said.problems.join(" ")} Say so in one short sentence, statements only.`

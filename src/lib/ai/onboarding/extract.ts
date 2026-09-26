@@ -138,3 +138,37 @@ Options (label = value): ${asked.chips.map((c) => `${c.label} = ${c.value}`).joi
     : null;
   return { website: grounded(output.website), goals: grounded(output.goals), business: grounded(output.business), answer };
 }
+
+// With Jev making the typed decisions (answered? which chip? which goal?), the
+// extractor only has to copy out what a decision model can't: free text.
+export const freeTextSchema = z.object({
+  goalInWords: z.string().nullable().describe("Their goal, briefly, in their own words; null if the message states none"),
+  whatTheyDo: z.string().nullable().describe("One sentence: what they sell; null if the message doesn't say"),
+  whoTheyServe: z.string().nullable().describe("Who their customers are, or who they want to reach; null if the message doesn't say"),
+  summary: z
+    .string()
+    .nullable()
+    .describe("Their answer to the current question in 5 words or fewer, styled like the options (e.g. 'Cafés and offices'). Null if they didn't answer it."),
+  evidence: z.string().describe("Verbatim quote from the user's latest message that the fields come from"),
+});
+
+export type FreeText = Omit<z.infer<typeof freeTextSchema>, "evidence">;
+
+/**
+ * The slim extractor: free-text fields from the latest message only, for an
+ * answer the decision model already classified. Null fields when the quote
+ * isn't really theirs.
+ */
+export async function extractFreeText(message: string, asked: AskedQuestion): Promise<FreeText> {
+  const { output } = await generateText({
+    model: models.extract,
+    system: `You copy a new user's answer out of their message during onboarding for Ploy, a marketing platform. Use only their words; never guess. Quote the words you used.`,
+    prompt: `Current question: ${asked.question}
+Options: ${asked.chips.map((c) => c.label).join("; ") || "none, free text only"}
+
+User's message: ${message}`,
+    output: Output.object({ schema: freeTextSchema }),
+  });
+  const { evidence, ...fields } = output;
+  return isQuoted(evidence, message) ? fields : { goalInWords: null, whatTheyDo: null, whoTheyServe: null, summary: null };
+}
