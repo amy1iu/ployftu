@@ -14,7 +14,8 @@ import { onboardingTurn, type OnboardingUIMessage } from "@/lib/ai/onboarding";
 import { getSpec } from "@/lib/catalog";
 import { getIntent, type IntentId } from "@/lib/catalog/intents";
 import { quickWins, type QuickWinId } from "@/lib/catalog/quick-wins";
-import { createWorkspace, getDocs, getMapNodes, getPloys, getWorkspace } from "@/lib/db/workspaces";
+import { knownItems, type ContextItemId } from "@/lib/catalog/context";
+import { createWorkspace, getDocs, getIntegrations, getMapNodes, getPloys, getWorkspace } from "@/lib/db/workspaces";
 import { readSection } from "@/lib/docs/markdown";
 import { syncMap } from "@/lib/map/sync";
 import { entryBranch } from "@/lib/onboarding/entry";
@@ -95,7 +96,7 @@ Tap a chip when one says what you'd say; otherwise type a short reply (1-2 sente
     : { text: (output.text ?? output.chip ?? "").trim() || "not sure", metadata: { slot } };
 }
 
-/** Runs one real step and times the next question. */
+/** Runs one real step and times the next question, and the whole step until its stream finishes. */
 async function runTurn(workspaceId: string, messages: OnboardingUIMessage[]) {
   const started = performance.now();
   let questionAt: number | null = null;
@@ -110,9 +111,21 @@ async function runTurn(workspaceId: string, messages: OnboardingUIMessage[]) {
   );
   let reply: OnboardingUIMessage | undefined;
   for await (const message of readUIMessageStream<OnboardingUIMessage>({ stream: timed })) reply = message;
+  const turnMs = performance.now() - started;
   if (!reply) throw new Error("No reply");
   await background;
-  return { reply, nextQuestionMs: questionAt };
+  return { reply, nextQuestionMs: questionAt, turnMs };
+}
+
+/** Which registry items are known now (after the turn's background work). */
+async function knownNow(workspaceId: string) {
+  const [workspace, docs, ploys, integrations] = await Promise.all([
+    getWorkspace(workspaceId),
+    getDocs(workspaceId),
+    getPloys(workspaceId),
+    getIntegrations(workspaceId),
+  ]);
+  return knownItems({ workspace, docs, ploys, integrations });
 }
 
 /** The first deliverables that fit the persona: its goal's (a landing page without a site), or the starter for "not sure". */
@@ -139,6 +152,10 @@ async function runPersona(persona: Persona) {
   const workspace = await createWorkspace({ isEval: true });
   const messages: OnboardingUIMessage[] = [greetingMessage()];
   const timings: number[] = [];
+  // Per turn: wall time of the step, whether it was a chip tap; per question: what was known when it was asked.
+  const turns: { ms: number; chip: boolean }[] = [];
+  const knownAtAsk: Record<ContextItemId, boolean>[] = [await knownNow(workspace.id)]; // the greeting's question
+  let turnsToQuickWin: number | null = null;
 
   try {
     for (let turn = 1; turn <= MAX_USER_TURNS; turn++) {
@@ -146,9 +163,12 @@ async function runPersona(persona: Persona) {
       if (!asked) break;
       const move = await simulateUser(persona, messages, asked);
       messages.push({ id: `u${turn}`, role: "user", parts: [{ type: "text", text: move.text }], metadata: move.metadata });
-      const { reply, nextQuestionMs } = await runTurn(workspace.id, messages);
+      const { reply, nextQuestionMs, turnMs } = await runTurn(workspace.id, messages);
       messages.push(reply);
       if (nextQuestionMs !== null) timings.push(nextQuestionMs);
+      turns.push({ ms: turnMs, chip: "value" in move.metadata && move.metadata.value !== undefined });
+      if (part(reply, "data-question")) knownAtAsk.push(await knownNow(workspace.id));
+      if (turnsToQuickWin === null && part(reply, "data-taskStarted")) turnsToQuickWin = turn;
     }
 
     await syncMap(workspace.id); // the eval skips side effects; place the tasks now
@@ -162,15 +182,19 @@ async function runPersona(persona: Persona) {
     const { expect } = persona;
     const doc = (slug: string) => docs.find((d) => d.slug === slug)!;
 
-    // What the trail asked: every card, and whether its slot was already answered at the time.
-    const questions: { slot: string; question: string; chips: number; reask: boolean }[] = [];
+    // What the trail asked: every card, whether its slot was already answered at the time, and whether
+    // its registry item was already known (from their site or an earlier answer) when it was asked.
+    const questions: { slot: string; question: string; chips: number; reask: boolean; knownAtAsk: boolean }[] = [];
     messages.forEach((m, i) => {
       const q = part<QuestionData>(m, "data-question");
       if (!q) return;
       const before = answeredSlots(messages.slice(0, i + 1));
       const slots: AnsweredSlot[] = isFork(q) ? [q.slot, "quick_win_offer"] : [q.slot];
-      questions.push({ slot: q.slot, question: q.question, chips: q.chips.length, reask: slots.some((s) => before.has(s)) });
+      const known = knownAtAsk[questions.length];
+      questions.push({ slot: q.slot, question: q.question, chips: q.chips.length, reask: slots.some((s) => before.has(s)), knownAtAsk: !!known?.[q.slot] });
     });
+    const finished = !openQuestion(messages);
+    const knownAtEnd = await knownNow(workspace.id);
     const answers = messages.flatMap((m) => {
       const a = part<AnsweredData>(m, "data-answered");
       return a ? [a] : [];
@@ -194,8 +218,17 @@ async function runPersona(persona: Persona) {
       id: persona.id,
       expected: expect.branch,
       branch: entryBranch(entry),
-      finished: !openQuestion(messages),
+      finished,
       questions,
+      trail: {
+        reaskedKnown: questions.filter((q) => q.knownAtAsk).length,
+        questionsToDone: finished ? questions.length : null,
+        stoppedEarly: finished && !(knownAtEnd.goal_detail && knownAtEnd.target_customer),
+        neverStopped: !finished && turns.length >= MAX_USER_TURNS,
+        turnsToQuickWin,
+        msPerTurn: turns.map((t) => Math.round(t.ms)),
+        chipTapMs: turns.filter((t) => t.chip).map((t) => Math.round(t.ms)),
+      },
       answers,
       quickWin: quickWin?.spec?.id ?? null,
       picked,
@@ -255,8 +288,12 @@ const results = await pool(selected, CONCURRENCY, async (p) => {
   try {
     const r = await runPersona(p);
     const failed = Object.entries({ ...r.checks, ...r.docChecks }).filter(([, v]) => v === false).map(([k]) => k);
+    const t = r.trail;
     console.log(
       `${failed.length ? "✗" : "✓"} ${p.id.padEnd(28)} path ${r.branch ?? "-"}/${r.expected}  ${r.questions.length} cards  win ${r.quickWin ?? "-"}${r.picked ? " (picked)" : ""}${failed.length ? `  failed: ${failed.join(", ")}` : ""}`,
+    );
+    console.log(
+      `    reaskedKnown ${t.reaskedKnown}  questionsToDone ${t.questionsToDone ?? "-"}  stoppedEarly ${t.stoppedEarly}  neverStopped ${t.neverStopped}  turnsToQuickWin ${t.turnsToQuickWin ?? "-"}  msPerTurn p50 ${Math.round(percentile(t.msPerTurn, 50))}  chipTapMs p50 ${t.chipTapMs.length ? Math.round(percentile(t.chipTapMs, 50)) : "-"}`,
     );
     return r;
   } catch (error) {
@@ -291,6 +328,24 @@ const metrics = [
   { name: "Personas that errored", value: results.length - ok.length, max: 0 },
 ];
 
+// The trail's shape: how many questions, whether it re-asks what it knows, when it stops, how fast a step is.
+const turnMs = ok.flatMap((r) => r.trail.msPerTurn);
+const tapMs = ok.flatMap((r) => r.trail.chipTapMs);
+const done = ok.map((r) => r.trail.questionsToDone).filter((v): v is number => v !== null);
+const toWin = ok.map((r) => r.trail.turnsToQuickWin).filter((v): v is number => v !== null);
+const trailMetrics = {
+  reaskedKnown: ok.reduce((s, r) => s + r.trail.reaskedKnown, 0),
+  questionsToDone: { p50: percentile(done, 50), mean: Math.round(mean(done) * 10) / 10, n: done.length },
+  stoppedEarly: ok.filter((r) => r.trail.stoppedEarly).length,
+  neverStopped: ok.filter((r) => r.trail.neverStopped).length,
+  turnsToQuickWin: { p50: percentile(toWin, 50), mean: Math.round(mean(toWin) * 10) / 10, n: toWin.length, none: ok.length - toWin.length },
+  msPerTurn: { p50: Math.round(percentile(turnMs, 50)), p95: Math.round(percentile(turnMs, 95)), n: turnMs.length },
+  chipTapMs: { p50: Math.round(percentile(tapMs, 50)), n: tapMs.length },
+  flags: { JEV_DECISIONS: process.env.JEV_DECISIONS ?? "", JEV_NEXT: process.env.JEV_NEXT ?? "choice", JEV_SHADOW: process.env.JEV_SHADOW ?? "" },
+};
+console.log("\nTrail shape");
+for (const [name, value] of Object.entries(trailMetrics)) console.log(`  ${name.padEnd(18)} ${JSON.stringify(value)}`);
+
 console.log("\nTrail gates");
 let allPass = true;
 for (const m of metrics) {
@@ -302,6 +357,6 @@ for (const m of metrics) {
 
 await mkdir("evals/results", { recursive: true });
 const file = `evals/results/entry-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-await writeFile(file, JSON.stringify({ metrics, results }, null, 2));
+await writeFile(file, JSON.stringify({ metrics, trail: trailMetrics, results }, null, 2));
 console.log(`\n${allPass ? "All gates pass." : "Some gates fail."} Full transcripts: ${file}`);
 process.exit(allPass ? 0 : 1);
