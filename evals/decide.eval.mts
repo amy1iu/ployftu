@@ -9,6 +9,8 @@
 //   npm run eval:decide -- --only jev --limit 20 a subset
 //   npm run eval:decide -- --filter tc_          cases whose id starts with tc_
 //   npm run eval:decide -- --skip-next           turns only
+//   --retries 15 --jev-concurrency 2             patience with Jev's rate limits
+//   npm run eval:decide -- --rescore evals/results/decide-….json   re-score saved answers (no model calls)
 //
 // Needs no database. Jev calls retry on the gateway's rate-limit errors (the
 // first-attempt failure rate is reported); latency is the successful attempt's.
@@ -94,11 +96,13 @@ const gatewayModel: Record<string, string> = { "gpt-4.1": "openai/gpt-4.1", "gpt
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Jev with retries on rate limits: the eval measures quality, and reports how often the first try failed. */
+const retries = Number(flag("retries") ?? 15);
+const jevConcurrency = Number(flag("jev-concurrency") ?? 2);
 async function askJev(state: Parameters<typeof ask>[0], questions: Parameters<typeof ask>[1]) {
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt < retries; attempt++) {
     const r = await ask(state, questions, { timeoutMs: 8000, label: "eval" });
     if (r) return { ...r, attempts: attempt + 1 };
-    await sleep(2000 * 2 ** Math.min(attempt, 4));
+    await sleep(Math.min(30000, 2000 * 2 ** attempt));
   }
   return null;
 }
@@ -350,12 +354,53 @@ async function runNext() {
 // ── Run ────────────────────────────────────────────────────────────────────
 
 const report: Record<string, unknown> = { at: new Date().toISOString(), turns: turns.length };
-const tables: string[] = [];
 
-if (!skipTurns) {
+/** A method's scores, latency and cost from its rows, printed as a table. */
+function summarize(method: string, rows: { t: Turn; d: Decided }[], wallMs: number) {
+  const ok = rows.filter((r) => !r.d.failed);
+  const ms = ok.map((r) => r.d.ms);
+  const input = ok.reduce((s, r) => s + r.d.tokens.input, 0);
+  const output = ok.reduce((s, r) => s + r.d.tokens.output, 0);
+  const cost = (input * prices[method].input + output * prices[method].output) / 1e6;
+  const scores = scoreTurns(method, rows);
+  const firstTryFailed = method === "jev" ? ok.filter((r) => (r.d.attempts ?? 1) > 1).length : 0;
+  const lines = [
+    `\n${method}  (n=${ok.length}/${rows.length}${method === "jev" ? `, first try failed ${firstTryFailed}` : ""})  latency p50 ${percentile(ms, 50)}ms p95 ${percentile(ms, 95)}ms  cost/1k turns $${((cost / (ok.length || 1)) * 1000).toFixed(3)}`,
+  ];
+  for (const [decision, s] of Object.entries(scores)) {
+    if (!s.n) continue;
+    const cal = s.calibration ? "  cal " + s.calibration.map((b) => `${b.bucket}: ${b.n ? `${Math.round(b.accuracy! * 100)}% of ${b.n}` : "-"}`).join(" | ") : "";
+    const pr = "precision" in s ? `  P ${Math.round((s as unknown as { precision: number }).precision * 100)}% R ${Math.round((s as unknown as { recall: number }).recall * 100)}%` : "";
+    lines.push(`  ${decision.padEnd(22)} ${Math.round(s.accuracy! * 100)}% (n=${s.n})${pr}${cal}`);
+  }
+  console.log(lines.join("\n"));
+  return {
+    scores,
+    latency: { p50: percentile(ms, 50), p95: percentile(ms, 95), over1500: ms.filter((x) => x > 1500).length },
+    tokens: { input, output },
+    costPer1kTurns: ok.length ? (cost / ok.length) * 1000 : null,
+    failed: rows.length - ok.length,
+    firstTryFailed,
+    wallMs,
+    rows: rows.map((r) => ({ id: r.t.id, ...r.d })),
+  };
+}
+
+// --rescore <results.json>: score saved rows again (e.g. after fixing a label), without calling any model.
+const rescore = flag("rescore");
+if (rescore) {
+  const saved = JSON.parse(await readFile(rescore, "utf8")) as Record<string, { rows?: ({ id: string } & Decided)[]; wallMs?: number }>;
+  for (const method of Object.keys(prices)) {
+    const rows = saved[method]?.rows;
+    if (!rows) continue;
+    const byId = new Map(set.turns.map((t) => [t.id, t]));
+    report[method] = summarize(method, rows.filter((r) => byId.has(r.id)).map((d) => ({ t: byId.get(d.id)!, d })), saved[method].wallMs ?? 0);
+  }
+  if (saved.next) report.next = saved.next;
+} else if (!skipTurns) {
   for (const method of only) {
     const started = performance.now();
-    const rows = await pool(turns, method === "jev" ? 2 : 4, async (t) => {
+    const rows = await pool(turns, method === "jev" ? jevConcurrency : 4, async (t) => {
       try {
         return { t, d: method === "jev" ? await jevTurn(t) : await llmTurn(t, gatewayModel[method]) };
       } catch (error) {
@@ -363,37 +408,11 @@ if (!skipTurns) {
         return { t, d: { failed: true } as Decided };
       }
     });
-    const ok = rows.filter((r) => !r.d.failed);
-    const ms = ok.map((r) => r.d.ms);
-    const input = ok.reduce((s, r) => s + r.d.tokens.input, 0);
-    const output = ok.reduce((s, r) => s + r.d.tokens.output, 0);
-    const cost = (input * prices[method].input + output * prices[method].output) / 1e6;
-    const scores = scoreTurns(method, rows);
-    const firstTryFailed = method === "jev" ? ok.filter((r) => (r.d.attempts ?? 1) > 1).length : 0;
-    report[method] = {
-      scores,
-      latency: { p50: percentile(ms, 50), p95: percentile(ms, 95), over1500: ms.filter((x) => x > 1500).length },
-      tokens: { input, output },
-      costPer1kTurns: ok.length ? (cost / ok.length) * 1000 : null,
-      failed: rows.length - ok.length,
-      firstTryFailed,
-      wallMs: Math.round(performance.now() - started),
-      rows: rows.map((r) => ({ id: r.t.id, ...r.d })),
-    };
-    tables.push(
-      `\n${method}  (n=${ok.length}/${rows.length}${method === "jev" ? `, first try failed ${firstTryFailed}` : ""})  latency p50 ${percentile(ms, 50)}ms p95 ${percentile(ms, 95)}ms  cost/1k turns $${((cost / (ok.length || 1)) * 1000).toFixed(3)}`,
-    );
-    for (const [decision, s] of Object.entries(scores)) {
-      if (!s.n) continue;
-      const cal = s.calibration ? "  cal " + s.calibration.map((b) => `${b.bucket}: ${b.n ? `${Math.round(b.accuracy! * 100)}% of ${b.n}` : "-"}`).join(" | ") : "";
-      const pr = "precision" in s ? `  P ${Math.round((s as unknown as { precision: number }).precision * 100)}% R ${Math.round((s as unknown as { recall: number }).recall * 100)}%` : "";
-      tables.push(`  ${decision.padEnd(22)} ${Math.round(s.accuracy! * 100)}% (n=${s.n})${pr}${cal}`);
-    }
-    console.log(tables.slice(-Object.keys(scores).length - 1).join("\n"));
+    report[method] = summarize(method, rows, Math.round(performance.now() - started));
   }
 }
 
-if (!skipNext && only.includes("jev")) {
+if (!rescore && !skipNext && only.includes("jev")) {
   const next = await runNext();
   const acc = (key: "today" | "choice" | "composite") => {
     const xs = next.map((r) => (key === "today" ? r.today : (r[key]?.pick ?? null)));

@@ -1744,7 +1744,8 @@
      "answered"
     ],
     "chip_match": [
-     "Write a cold email sequence"
+     "Write a cold email sequence",
+     "Run outbound outreach"
     ],
     "website_status": null,
     "goal_intent": null,
@@ -3432,10 +3433,10 @@
     ],
     "website_status": null,
     "goal_intent": null,
-    "profile_touch": [
+    "profile_touch": [],
+    "profile_touch_optional": [
      "who-we-serve"
-    ],
-    "profile_touch_optional": []
+    ]
    }
   },
   {
@@ -3846,10 +3847,10 @@
     ],
     "website_status": null,
     "goal_intent": null,
-    "profile_touch": [
+    "profile_touch": [],
+    "profile_touch_optional": [
      "who-we-serve"
-    ],
-    "profile_touch_optional": []
+    ]
    }
   },
   {
@@ -3984,7 +3985,8 @@
     ],
     "profile_touch_optional": [
      "challenges",
-     "constraints"
+     "constraints",
+     "outreach"
     ]
    }
   },
@@ -4525,7 +4527,9 @@
     "website_status": null,
     "goal_intent": null,
     "profile_touch": [],
-    "profile_touch_optional": []
+    "profile_touch_optional": [
+     "acquisition"
+    ]
    }
   },
   {
@@ -4710,11 +4714,12 @@
     "website_status": null,
     "goal_intent": null,
     "profile_touch": [
-     "acquisition",
      "outreach",
      "tools"
     ],
-    "profile_touch_optional": []
+    "profile_touch_optional": [
+     "acquisition"
+    ]
    }
   },
   {
@@ -4944,10 +4949,10 @@
     ],
     "website_status": null,
     "goal_intent": null,
-    "profile_touch": [
+    "profile_touch": [],
+    "profile_touch_optional": [
      "constraints"
-    ],
-    "profile_touch_optional": []
+    ]
    }
   },
   {
