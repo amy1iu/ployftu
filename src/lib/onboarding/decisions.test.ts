@@ -3,6 +3,7 @@ import type { Doc, Workspace } from "@/lib/db/types";
 import { emptyProfileDocs } from "@/lib/docs/profile";
 import {
   confidence,
+  nextChoiceQuestions,
   nextCompositeQuestions,
   nextState,
   pickNext,
@@ -13,6 +14,7 @@ import {
   recordedFrom,
   touchId,
   turnQuestions,
+  turnRequest,
   turnState,
   withConfidence,
   type Answers,
@@ -179,5 +181,29 @@ describe("recordedFrom", () => {
     const docs = emptyProfileDocs() as unknown as Doc[];
     const recorded = recordedFrom(workspace, docs);
     expect(recorded).toMatchObject({ website: "has a site: https://acme.com", goal: 'Run outbound outreach "reach HR leaders"', whatTheyDo: null, tools: "email: Gmail" });
+  });
+});
+
+describe("one request per turn", () => {
+  const known = { website: true, goal_detail: true, quick_win_offer: false, target_customer: false, business_model: true, current_acquisition: false, constraints: false, tool: false };
+  const next = { recorded: input.recorded, known, asking: "target_customer" as const, message: input.message };
+  const decisions = new Set<Decision>(["answer_status", "chip_match", "goal_intent", "profile_touch"]);
+
+  it("asks the message decisions and both next_info designs together, over one state", () => {
+    const request = turnRequest({ input, decisions, next, designs: ["choice", "composite"] })!;
+    const ids = Object.keys(request.questions);
+    expect(ids.length).toBe(
+      Object.keys(turnQuestions(input, decisions)).length + Object.keys(nextChoiceQuestions()).length + Object.keys(nextCompositeQuestions()).length,
+    );
+    expect(ids).toEqual(expect.arrayContaining(["answer_status", "chip_match", "next_info", "known_constraints"]));
+    expect(request.state).toMatchObject({ question_on_screen: { text: input.question }, user_latest_message: "mostly cafés", not_known_yet: expect.any(Array) });
+    expect(request.state).not.toHaveProperty("recorded_so_far");
+  });
+
+  it("asks only next_info for a chip tap, and nothing when there's nothing to ask", () => {
+    const tap = turnRequest({ input: null, decisions, next: { ...next, message: null }, designs: ["choice"] })!;
+    expect(Object.keys(tap.questions)).toEqual(["next_info"]);
+    expect(tap.state).not.toHaveProperty("question_on_screen");
+    expect(turnRequest({ input: null, decisions, next, designs: [] })).toBeNull();
   });
 });

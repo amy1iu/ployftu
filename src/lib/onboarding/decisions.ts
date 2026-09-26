@@ -121,8 +121,9 @@ export type TurnInput = {
 /** Every chip on screen, the fork's quick wins included. */
 export const chipsOf = (input: Pick<TurnInput, "chips" | "alt">) => [...input.chips, ...(input.alt?.chips ?? [])];
 
-export function turnState(input: TurnInput) {
-  const { question, alt, previous, message, recorded } = input;
+/** The card on screen and what the user typed under it. */
+function turnCard(input: TurnInput) {
+  const { question, alt, previous, message } = input;
   return {
     question_on_screen: {
       asks_for: `${input.item}: ${contextItems[input.item].why}`,
@@ -132,8 +133,13 @@ export function turnState(input: TurnInput) {
     },
     ...(previous ? { assistant_said_before: previous } : {}),
     user_latest_message: message,
-    recorded_so_far: { website: recorded.website, goal: recorded.goal, what_they_do: recorded.whatTheyDo ?? "unknown" },
   };
+}
+
+/** The state for questions about a typed message alone: the card, the message, a line of what's recorded. */
+export function turnState(input: TurnInput) {
+  const { website, goal, whatTheyDo } = input.recorded;
+  return { ...turnCard(input), recorded_so_far: { website, goal, what_they_do: whatTheyDo ?? "unknown" } };
 }
 
 // ── Questions about a typed message ────────────────────────────────────────
@@ -415,6 +421,31 @@ export const nextCompositeQuestions = (): Record<string, Question> =>
   );
 
 export const nextQuestions = (design: NextDesign) => (design === "choice" ? nextChoiceQuestions() : nextCompositeQuestions());
+
+// ── One request per turn ───────────────────────────────────────────────────
+
+/**
+ * Everything a turn asks Jev, as one request. Rate limits count requests, and
+ * Jev answers every question in a request in parallel (20 yes/no questions take
+ * as long as one), so the message decisions and next_info share one state: the
+ * card and the message (when they typed), plus what's known. `business` already
+ * says what `recorded_so_far` would, so it's left out. Null when there's nothing to ask.
+ */
+export function turnRequest({
+  input,
+  decisions,
+  next,
+  designs,
+}: {
+  input: TurnInput | null;
+  decisions: ReadonlySet<Decision>;
+  next: NextInput;
+  designs: readonly NextDesign[];
+}): { state: ReturnType<typeof nextState> & Partial<ReturnType<typeof turnCard>>; questions: Record<string, Question> } | null {
+  const questions = Object.assign({}, input ? turnQuestions(input, decisions) : {}, ...designs.map(nextQuestions));
+  if (!Object.keys(questions).length) return null;
+  return { state: { ...(input ? turnCard(input) : {}), ...nextState(next) }, questions };
+}
 
 /**
  * The item to ask next among `candidates` (what the code says is askable after

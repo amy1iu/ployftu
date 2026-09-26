@@ -10,8 +10,6 @@ import { normalizeUrl } from "@/lib/onboarding/entry";
 import { applyAnswer, type AppliedAnswer } from "@/lib/onboarding/answer";
 import {
   decisionIds,
-  nextQuestions,
-  nextState,
   pickNext,
   readChip,
   readGoal,
@@ -20,8 +18,7 @@ import {
   readWebsite,
   recordedFrom,
   chipsOf,
-  turnQuestions,
-  turnState,
+  turnRequest,
   type Decision,
   type NextDesign,
   type TurnInput,
@@ -217,10 +214,11 @@ type Started = {
 };
 
 /**
- * Starts this turn's Jev calls from the state before the answer lands: one
- * about the typed message (small state: the card, the message, a line of
- * what's recorded), one about what to ask next (what's known). Two calls, not
- * one, because Jev gets distracted by state a question doesn't need.
+ * Starts this turn's Jev call from the state before the answer lands: one
+ * request for everything, the typed message's decisions and what to ask next
+ * (both next_info designs in shadow). Rate limits count requests, and Jev
+ * answers all of a request's questions in parallel, so one call costs no more
+ * time than one question.
  */
 async function startDecisions({
   workspaceId,
@@ -265,13 +263,17 @@ async function startDecisions({
           recorded,
         }
       : null;
-  const turn = input && inPlay.size ? ask(turnState(input), turnQuestions(input, inPlay), { workspaceId, label: "turn" }) : null;
-
-  const designs: NextDesign[] = shadow ? ["choice", "composite"] : decisions.has("next_info") ? [nextDesign()] : [];
-  const state = nextState({ recorded, known, asking: asked?.slot ?? null, message: latest ? message : null });
-  const next = Promise.all(
-    designs.map(async (d) => [d, asked ? await ask(state, nextQuestions(d), { workspaceId, label: `next_${d}` }) : null] as const),
-  ).then((pairs) => Object.fromEntries(pairs));
+  // next_info only while a card is open (none once the trail is done).
+  const designs: NextDesign[] = !asked ? [] : shadow ? ["choice", "composite"] : decisions.has("next_info") ? [nextDesign()] : [];
+  const request = turnRequest({
+    input,
+    decisions: inPlay,
+    next: { recorded, known, asking: asked?.slot ?? null, message: latest ? message : null },
+    designs,
+  });
+  const call = request ? ask(request.state, request.questions, { workspaceId, label: "turn" }) : Promise.resolve(null);
+  const turn = input && inPlay.size ? call : null;
+  const next = call.then((r) => Object.fromEntries(designs.map((d) => [d, r])));
   return { workspace, turn, input, next, known };
 }
 

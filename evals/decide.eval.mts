@@ -341,9 +341,10 @@ async function runNext() {
     const candidates = askable(trail);
     const today = nextQuestion(trail)?.slot ?? "nothing";
     const state = nextState({ recorded: recordedFrom(trail.workspace, trail.docs as Doc[]), known: knownItems(trail), asking: c.asking, message: c.message });
+    // Both designs in one request: Jev answers a request's questions in parallel, and rate limits count requests.
+    const r = designs.length ? await askJev(state, Object.assign({}, ...designs.map(nextQuestions))) : null;
     const jev: Record<string, { pick: string; ms: number; confidence: number } | null> = {};
     for (const d of designs) {
-      const r = await askJev(state, nextQuestions(d));
       const pick = r && pickNext(r.answers as Answers, d, candidates);
       jev[d] = r && pick ? { pick: pick.value ?? "nothing", ms: r.ms, confidence: pick.confidence } : null;
     }
