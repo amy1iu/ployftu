@@ -1,12 +1,12 @@
 import type { UIMessage } from "ai";
 import { catalogForPrompt, getIntent, quickWins } from "@/lib/catalog";
-import { contextItemIds, contextItems, type ContextKey } from "@/lib/catalog/context";
+import { contextItemIds, contextItems, type ContextItemId, type ContextKey } from "@/lib/catalog/context";
 import { integrationCategories } from "@/lib/catalog/integrations";
 import type { Doc } from "@/lib/db/types";
 import { readSection } from "@/lib/docs/markdown";
 import { getProfileSection } from "@/lib/docs/profile";
 import { toolToAsk } from "@/lib/map/plan";
-import { defaultQuickWin, type Entry } from "@/lib/onboarding/entry";
+import { defaultQuickWin, topIntent, type Entry } from "@/lib/onboarding/entry";
 import {
   chipOptions,
   itemStatus,
@@ -60,42 +60,73 @@ function messageRule(said: Said | null, planning: boolean) {
     : 'Leave it empty ("").';
 }
 
-const statusText: Record<ItemStatus, string> = {
-  known: "KNOWN (they told us; never ask)",
-  answered: "ANSWERED (asked already; they weren't sure or skipped; don't ask again)",
-  inferred: "INFERRED from their site (unconfirmed)",
-  reading: "COMING from their site, which is being read (don't ask)",
-  missing: "MISSING",
-  unavailable: "NOT ASKABLE (nothing needs a tool yet)",
+/** What's recorded for an item, in a few words, for the "done" list. */
+function recorded(id: ContextItemId, state: TrailState, docs: Doc[]) {
+  const { entry } = state.workspace;
+  if (id === "website") return entry.website.url ?? entry.website.status.replace("_", " ");
+  if (id === "goal_detail") return describeEntry(entry).split("\n")[1].replace("- Goals: ", "");
+  if (id === "quick_win_offer") return `${state.ploys.find((p) => p.spec?.source === "quick_win")?.spec?.name ?? "one"} is running`;
+  if (id === "tool") return Object.values(entry.tools ?? {}).join(", ") || "connected";
+  for (const { doc, section } of contextItems[id].sections) {
+    const d = docs.find((x) => x.slug === doc);
+    const text = d && d.sections[section]?.status !== "empty" && readSection(d.content_md, getProfileSection(doc, section).heading);
+    if (text) return `"${text.replace(/\s+/g, " ").slice(0, 160)}"`;
+  }
+  return "known";
+}
+
+const dontAsk: Partial<Record<ItemStatus, string>> = {
+  answered: "asked already; they weren't sure or skipped",
+  reading: "coming from their site, which is being read",
+  unavailable: "none of their tasks need a tool yet",
 };
 
-/** The registry as the planner sees it: each item's status, why it matters, and its fixed options. */
+/**
+ * The registry as the planner sees it, grouped by what it may do with each
+ * item: done (never ask), don't ask, inferred (confirm at most), open (ask).
+ * Grouping, rather than a status per item, is what keeps the model from
+ * re-asking what's known.
+ */
 function describeItems(state: TrailState, docs: Doc[]) {
-  return contextItemIds
-    .filter((id) => id !== "website")
-    .map((id) => {
-      const item = contextItems[id];
-      const status = itemStatus(id, state);
-      const lines = [`## ${id} (${item.label}): ${statusText[status]}`, `Why: ${item.why}`];
-      if (status === "inferred")
-        for (const { doc, section } of item.sections) {
-          const d = docs.find((x) => x.slug === doc);
-          const text = d && d.sections[section]?.status === "inferred" && readSection(d.content_md, getProfileSection(doc, section).heading);
-          if (text) lines.push(`Their site says: ${text.replace(/\s+/g, " ").slice(0, 300)}`);
-        }
-      if (status === "missing" || status === "inferred") {
-        const options = chipOptions(id, state);
-        if (id === "tool") {
-          const category = toolToAsk(state)!;
-          lines.push(
-            `Ask about: ${integrationCategories[category].name} (${integrationCategories[category].need}), the capability most of their tasks need. e.g. "${toolQuestions[category]}"`,
-          );
-        }
-        if (options?.length) lines.push(`Options (chips must come from these): ${options.map((o, i) => `${i + 1}. ${o.label}`).join("; ")}`);
-      }
-      return lines.join("\n");
-    })
-    .join("\n\n");
+  const ids = contextItemIds.map((id) => ({ id, status: itemStatus(id, state) }));
+  const list = (status: ItemStatus[], line: (id: ContextItemId, status: ItemStatus) => string) =>
+    ids.filter((i) => status.includes(i.status)).map((i) => line(i.id, i.status)).join("\n") || "- (none)";
+  const open = (id: ContextItemId) => {
+    const lines = [`- ${id} (${contextItems[id].label}): ${contextItems[id].why}`];
+    if (id === "tool") {
+      const category = toolToAsk(state)!;
+      lines.push(`  Ask about ${integrationCategories[category].need}, what most of their tasks need, e.g. "${toolQuestions[category]}"`);
+    }
+    const intent = topIntent(state.workspace.entry);
+    if (id === "target_customer" && intent) lines.push(`  For their goal, e.g. "${getIntent(intent).audienceQuestion}"`);
+    const options = chipOptions(id, state);
+    if (options?.length) lines.push(`  Options: ${options.map((o, i) => `${i + 1}. ${o.label}`).join("; ")}`);
+    return lines.join("\n");
+  };
+  return `## Done: never ask about these again, not even to refine or confirm
+${list(["known"], (id) => `- ${id}: ${recorded(id, state, docs)}`)}
+
+## Don't ask
+${list(["answered", "reading", "unavailable"], (id, status) => `- ${id}: ${dontAsk[status]}`)}
+
+## Inferred from their site: don't ask cold; confirm only if it matters for their goal
+${list(["inferred"], (id) => `${open(id)}\n  Their site says: ${recorded(id, state, docs)}`)}
+
+## Open: the only items you may ask about
+${list(["missing"], open)}`;
+}
+
+/** Whether the trail has what it needs: the goal and who it's for (either may be "not sure"), and a first deliverable running. */
+function readiness(state: TrailState) {
+  const settled = (id: ContextItemId) => ["known", "answered"].includes(itemStatus(id, state));
+  const missing = [
+    !settled("goal_detail") && "goal_detail",
+    !settled("target_customer") && "target_customer",
+    !contextItems.quick_win_offer.known(state) && "a running quick win",
+  ].filter(Boolean);
+  return missing.length
+    ? `Not ready to finish. Still needed: ${missing.join(", ")}.`
+    : "READY TO FINISH: their goal and who they want to reach are in, and their first deliverable is running. Set next to null now.";
 }
 
 /** Their first deliverable: running, picked, or what starts on its own once we know enough. */
@@ -171,19 +202,20 @@ The user is on Getting Started: a short trail of question cards, each answerable
 # What to write
 - message: ${messageRule(said, planning)}
 - next: ${next}
-  - item: the registry item the card asks about.
+  - item: the item the card asks about (from Open, or Inferred to confirm).
   - question: one plain sentence, 15 words or fewer, ending in "?", specific to their business. No lead-in pleasantries.
-  - hint: one short line on what answering unlocks for them, or null.
-  - chips: items with Options: pick 2-4, written as "<option number>. <label>" (you may reorder, and tailor a label's wording to them, keeping its meaning). Other items: 2-3 short answers (1-4 words) specific to their business, like "Independent cafés"; never generic. "Not sure yet" is added for you.
-  - alt: a quick-win card offered beside this one (the fork: "a quick win now, or tell me your goal"), with chips from quick_win_offer's Options. Only while no quick win is running; otherwise null.
+  - hint: what answering unlocks for them, 8 words or fewer, or null.
+  - chips: items with Options: pick 2-4, written as "<option number>. <label>" (you may reorder, and tailor a label's wording to them, keeping its meaning). Other items: always 2-3 short answers (1-4 words) specific to their business, like "Independent cafés"; never generic, never empty. "Not sure yet" is added for you.
+  - alt: a quick-win card offered beside this one (the fork: "a quick win now, or tell me your goal"). Only while quick_win_offer is Open; otherwise null. Keep it light: a short question, hint null, and chips [] to show quick_win_offer's Options as they are (or pick from them).
 
 # How to plan
-1. Never ask about an item that's KNOWN, ANSWERED, COMING from their site, or NOT ASKABLE. Check the trail so far too: if they already said it, even in passing, don't ask it.
-2. INFERRED from their site: don't ask cold. If it matters for their goal, confirm it instead ("Your site says you serve dental clinics. Are they who you want to reach?"), with the inferred answer as the first chip.
-3. Pick what unlocks the most for their goal. Usually: goal_detail (with the quick win as alt) → target_customer → tool. business_model only when there's no readable site. current_acquisition or constraints only if the answer would change what Ploy does for their goal, and there's room.
-4. Offer the quick win early: put it beside the goal question as alt. If they went for the goal and it's already known, you don't need to offer it separately: their first deliverable starts on its own once goal_detail and target_customer are in.
-5. One question per card, about one item. Ask it as a person would, using what you know ("Who do you most want your ads to reach?").
-6. Finish (next: null) once goal_detail and target_customer are known or answered and a quick win is running, after the tool question if one is askable and there's room. Also finish when they seem done, impatient, or want to get going. Short beats thorough: every card costs them time.
+1. Ask only about items listed under Open (or confirm an Inferred one). Never ask about anything under Done or Don't ask, even reworded. If they already said it in the trail so far, even in passing, it's done.
+2. No readable site (none, not live, or couldn't be read): ask business_model first; everything Ploy makes needs it.
+3. Then goal_detail, with the quick win offered beside it as alt (the fork). If they pick the quick win, ask goal_detail next.
+4. Then target_customer, asked for their goal. Their first deliverable starts on its own once goal_detail and target_customer are in.
+5. current_acquisition, constraints, and tool only when they'd change what Ploy does first for them, and the trail isn't ready to finish.
+6. Finish (next: null) as soon as it's READY TO FINISH, or when they seem done, impatient, or want to get going. Short beats thorough: every card costs them time.
+7. One question per card, about one item.
 
 # Rules
 - Warm, plain, and brief. No filler, no exclamation marks.
@@ -191,7 +223,9 @@ The user is on Getting Started: a short trail of question cards, each answerable
 - If they ask for something Ploy doesn't do, say so honestly and name the closest thing it does.
 - Never say a tool is connected or that Ploy has access to one. Naming a tool only tells Ploy what they use; they connect it themselves, and approve the access, from a task that needs it.
 
-# What we want to learn (the registry)
+# Where the trail stands
+${readiness(state)}
+
 ${describeItems(state, docs)}
 
 # Their first deliverable (quick win)
