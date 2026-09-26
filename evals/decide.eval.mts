@@ -335,7 +335,7 @@ function trailOf(c: NextCase): TrailState {
 }
 
 async function runNext() {
-  const designs: NextDesign[] = ["choice", "composite"];
+  const designs: NextDesign[] = only.includes("jev") ? ["choice", "composite"] : [];
   return pool(set.next, 2, async (c) => {
     const trail = trailOf(c);
     const candidates = askable(trail);
@@ -412,7 +412,7 @@ if (rescore) {
   }
 }
 
-if (!rescore && !skipNext && only.includes("jev")) {
+if (!rescore && !skipNext) {
   const next = await runNext();
   const acc = (key: "today" | "choice" | "composite") => {
     const xs = next.map((r) => (key === "today" ? r.today : (r[key]?.pick ?? null)));
@@ -429,10 +429,11 @@ if (!rescore && !skipNext && only.includes("jev")) {
   console.log(`\nnext_info (n=${next.length})`);
   for (const key of ["today", "choice", "composite"] as const) {
     const a = acc(key);
+    if (!a.n) continue;
     console.log(`  ${key.padEnd(10)} ${Math.round(a.accuracy * 100)}% (n=${a.n})${key === "today" ? "" : `  p50 ${percentile(ms(key), 50)}ms p95 ${percentile(ms(key), 95)}ms`}`);
   }
   for (const r of next)
-    if (![r.today, r.choice?.pick, r.composite?.pick].every((p) => p && r.gold.includes(p)))
+    if (![r.today, r.choice?.pick, r.composite?.pick].every((p) => !p || r.gold.includes(p)))
       console.log(`    ${r.id.padEnd(32)} gold ${r.gold.join("|").padEnd(36)} today ${r.today.padEnd(18)} choice ${(r.choice?.pick ?? "-").padEnd(18)} composite ${r.composite?.pick ?? "-"}`);
 }
 
