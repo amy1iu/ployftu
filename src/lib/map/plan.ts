@@ -1,9 +1,8 @@
 import { getIntent } from "@/lib/catalog/intents";
-import { integrationCategoryIds, type IntegrationCategory } from "@/lib/catalog/integrations";
 import { getSpec, templates, type PloybookSpec } from "@/lib/catalog";
 import { contextKeys, type ContextItemId } from "@/lib/catalog/context";
 import type { RegionId } from "@/lib/catalog/regions";
-import type { Doc, Integration, MapNode, Ploy, Workspace } from "@/lib/db/types";
+import type { Doc, MapNode, Ploy, Workspace } from "@/lib/db/types";
 import { hasContext } from "@/lib/docs/profile";
 import { mapFocus, regionSlots } from "./state";
 
@@ -41,63 +40,28 @@ export function plannedTemplates(workspace: Workspace, ploys: Ploy[], nodes: Pic
 }
 
 /**
- * The tool worth asking about during onboarding: the capability that the most
- * tasks on the map (or about to be) are waiting on, goal regions counting double.
- */
-export function toolToAsk({
-  workspace,
-  ploys,
-  mapNodes,
-  integrations,
-}: {
-  workspace: Workspace;
-  ploys: Ploy[];
-  mapNodes: MapNode[];
-  integrations: Integration[];
-}): IntegrationCategory | null {
-  const focus = mapFocus(workspace, ploys);
-  const specs = [
-    ...mapNodes.filter((n) => isTemplate(n.spec_id)).map((n) => getSpec(n.spec_id)!),
-    ...plannedTemplates(workspace, ploys, mapNodes),
-  ];
-  const connected = new Set(integrations.map((i) => i.category));
-  const score = new Map<IntegrationCategory, number>();
-  for (const spec of specs)
-    for (const category of spec.requires)
-      if (!connected.has(category))
-        score.set(category, (score.get(category) ?? 0) + (focus.emphasized.includes(spec.region) ? 2 : 1));
-  return integrationCategoryIds.filter((c) => score.has(c)).sort((a, b) => score.get(b)! - score.get(a)!)[0] ?? null;
-}
-
-/**
  * Where a task hangs on the trail: beside the card for the registry item whose
  * answer it's waiting on (e.g. target_customer), otherwise beside the one
  * that revealed it.
  * - site: the website (or the site-read node), which fills in what they sell
- * - tool: the tool question
  * - goal_detail: wherever they answered the goal
  * - build: the first deliverable, and everything revealed once it's done
  * A card the planner never puts up leaves its tasks for the end of the trail.
  */
-export type Anchor = "site" | "build" | Exclude<ContextItemId, "website">;
+export type Anchor = "site" | "build" | Exclude<ContextItemId, "website" | "tool">;
 
-/** Anchors written before the registry, by their item. */
-export const legacyAnchors: Record<string, Anchor> = { sell: "business_model", followup: "target_customer", goal: "goal_detail" };
+/** Anchors written by earlier versions, by where they sit now. The tool question is gone: its tasks sit with the goal. */
+export const legacyAnchors: Record<string, Anchor> = { sell: "business_model", followup: "target_customer", goal: "goal_detail", tool: "goal_detail" };
 
 export function anchorFor(
   spec: PloybookSpec,
   {
     workspace,
     docs,
-    integrations,
-    toolCategory,
     quickWinDone,
   }: {
     workspace: Workspace;
     docs: Pick<Doc, "slug" | "sections">[];
-    integrations: Integration[];
-    /** The tool the trail will ask about, if it hasn't yet. */
-    toolCategory: IntegrationCategory | null;
     quickWinDone: boolean;
   },
 ): Anchor {
@@ -107,8 +71,6 @@ export function anchorFor(
   // Reading their site will fill in what they sell.
   if (waitingOn === "offering" && entry.website.status === "has") return "site";
   if (waitingOn) return contextKeys[waitingOn].item;
-  if (toolCategory && spec.requires.includes(toolCategory) && !integrations.some((i) => i.category === toolCategory))
-    return "tool";
 
   const goalRegions = entry.goals.intents.flatMap(({ id }) => Object.keys(getIntent(id).regions));
   const siteRegions = entry.goals.status === "unsure" ? (crawl?.opportunities ?? []).flatMap(({ intent }) => Object.keys(getIntent(intent).regions)) : [];

@@ -1,19 +1,17 @@
 import type { UIMessage } from "ai";
 import { catalogForPrompt, getIntent, quickWins } from "@/lib/catalog";
-import { contextItemIds, contextItems, type ContextItemId } from "@/lib/catalog/context";
-import { integrationCategories } from "@/lib/catalog/integrations";
+import { contextItems, type ContextItemId } from "@/lib/catalog/context";
 import type { Doc } from "@/lib/db/types";
 import { readSection } from "@/lib/docs/markdown";
 import { getProfileSection } from "@/lib/docs/profile";
-import { toolToAsk } from "@/lib/map/plan";
 import { defaultQuickWin, topIntent, type Entry } from "@/lib/onboarding/entry";
 import {
   chipOptions,
   quickWinChips,
   quickWinNeeds,
   itemStatus,
+  trailItems,
   MAX_ANSWERED,
-  toolQuestions,
   type AnsweredData,
   type ItemStatus,
   type QuestionData,
@@ -70,7 +68,6 @@ function recorded(id: ContextItemId, state: TrailState, docs: Doc[]) {
   if (id === "website") return entry.website.url ?? entry.website.status.replace("_", " ");
   if (id === "goal_detail") return describeEntry(entry).split("\n")[1].replace("- Goals: ", "");
   if (id === "quick_win_offer") return `${state.ploys.find((p) => p.spec?.source === "quick_win")?.spec?.name ?? "one"} is running`;
-  if (id === "tool") return Object.values(entry.tools ?? {}).join(", ") || "connected";
   for (const { doc, section } of contextItems[id].sections) {
     const d = docs.find((x) => x.slug === doc);
     const text = d && d.sections[section]?.status !== "empty" && readSection(d.content_md, getProfileSection(doc, section).heading);
@@ -82,7 +79,6 @@ function recorded(id: ContextItemId, state: TrailState, docs: Doc[]) {
 const dontAsk: Partial<Record<ItemStatus, string>> = {
   answered: "asked already; they weren't sure or skipped",
   reading: "coming from their site, which is being read",
-  unavailable: "none of their tasks need a tool yet",
   waiting: "no quick win would be specific to them yet; it's offered once they've said what it needs (see Their first deliverable)",
 };
 
@@ -93,15 +89,11 @@ const dontAsk: Partial<Record<ItemStatus, string>> = {
  * re-asking what's known.
  */
 function describeItems(state: TrailState, docs: Doc[], done: boolean) {
-  const ids = contextItemIds.map((id) => ({ id, status: itemStatus(id, state) }));
+  const ids = trailItems.map((id) => ({ id, status: itemStatus(id, state) }));
   const list = (status: ItemStatus[], line: (id: ContextItemId, status: ItemStatus) => string) =>
     ids.filter((i) => status.includes(i.status)).map((i) => line(i.id, i.status)).join("\n") || "- (none)";
   const open = (id: ContextItemId) => {
     const lines = [`- ${id} (${contextItems[id].label}): ${contextItems[id].why}`];
-    if (id === "tool") {
-      const category = toolToAsk(state)!;
-      lines.push(`  Ask about ${integrationCategories[category].need}, what most of their tasks need, e.g. "${toolQuestions[category]}"`);
-    }
     const intent = topIntent(state.workspace.entry);
     if (id === "target_customer" && intent) lines.push(`  For their goal, e.g. "${getIntent(intent).audienceQuestion}"`);
     const options = chipOptions(id, state);
@@ -113,7 +105,7 @@ function describeItems(state: TrailState, docs: Doc[], done: boolean) {
 ${list(["known"], (id) => `- ${id}: ${recorded(id, state, docs)}`)}
 
 ## Don't ask
-${list(["answered", "reading", "unavailable", "waiting"], (id, status) => `- ${id}: ${dontAsk[status]}`)}
+${list(["answered", "reading", "waiting"], (id, status) => `- ${id}: ${dontAsk[status]}`)}
 
 ## Inferred from their site: don't ask cold; confirm only if it matters for their goal
 ${list(["inferred"], (id) => `${open(id)}\n  Their site says: ${recorded(id, state, docs)}`)}
@@ -232,7 +224,7 @@ The user is on Getting Started: a short trail of question cards, each answerable
 2. No readable site (none, not live, or couldn't be read): ask business_model first; everything Ploy makes needs it.
 3. Then goal_detail, with the quick win offered beside it as alt (the fork) when quick_win_offer is Open. If they pick the quick win, ask goal_detail next.
 4. Then target_customer, asked for their goal. Their first deliverable starts on its own once goal_detail and target_customer are in.
-5. current_acquisition, constraints, and tool only when they'd change what Ploy does first for them, and the trail isn't ready to finish.
+5. current_acquisition and constraints only when they'd change what Ploy does first for them, and the trail isn't ready to finish.
 6. A first deliverable is only as good as what we know about them: one built on nothing is generic and wastes their first impression. So quick wins are only offered once one has what it needs (quick_win_offer is under Open only then), and the first one starts on its own once it does. When the trail is waiting on something for their deliverable (see Their first deliverable), ask for that next.
 7. Finish (next: null) as soon as it's READY TO FINISH, even with items left: they're optional. Also finish when they seem done, impatient, or want to get going. Short beats thorough: every card costs them time.
 8. One question per card, about one item.

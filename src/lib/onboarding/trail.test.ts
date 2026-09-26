@@ -14,6 +14,7 @@ import {
   quickWinChips,
   quickWinNeeds,
   toQuestion,
+  trailItems,
   websiteQuestion,
   withoutFailedTurn,
   type AnsweredSlot,
@@ -84,11 +85,9 @@ describe("itemStatus", () => {
     expect(itemStatus("target_customer", state({ workspace: withSite, answered: new Set(["target_customer"]) }))).toBe("answered");
   });
 
-  it("has no tool to ask about until tasks need one", () => {
-    expect(itemStatus("tool", state({}))).toBe("unavailable");
-    expect(itemStatus("tool", state({ workspace: withSite }))).toBe("missing");
-    const named = workspace({ website: site, goals: outbound, tools: { email: "Gmail" } });
-    expect(itemStatus("tool", state({ workspace: named }))).toBe("known");
+  it("never asks which tool they use: they name it when a task needs it connected", () => {
+    expect(trailItems).not.toContain("tool");
+    expect(trailItems).toContain("target_customer");
   });
 });
 
@@ -197,12 +196,6 @@ describe("toQuestion", () => {
     const alt = { question: "Quick win?", hint: null, chips: [] };
     expect(toQuestion(planned({ item: "target_customer", alt }), s)?.alt).toBeNull();
     expect(toQuestion(planned({ item: "quick_win_offer" }), s)).toBeNull();
-  });
-
-  it("asks for the tool the most tasks need, with its chips and skip", () => {
-    const q = toQuestion(planned({ item: "tool", question: "Which email do you use?", chips: ["1. Gmail"] }), state({ workspace: withSite }));
-    expect(q).toMatchObject({ slot: "tool", category: "email" });
-    expect(q?.chips.map((c) => c.value)).toEqual(["email:Gmail", "email:Outlook", "skip"]);
   });
 
   it("finishes rather than ask something code can't serve", () => {

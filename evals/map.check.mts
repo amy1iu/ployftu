@@ -57,7 +57,7 @@ try {
   check("Slots are unique per region", new Set(nodes.map((n) => `${n.region}/${n.slot}`)).size === nodes.length);
   const anchorOf = (spec: string) => nodes.find((n) => n.spec_id === spec)?.anchor;
   check("Goal tasks hang off the goal", anchorOf("lead_list") === "goal_detail", anchorOf("lead_list") ?? "none");
-  check("Tasks waiting on the tool the trail asks about hang off that question", anchorOf("cold_outbound") === "tool", anchorOf("cold_outbound") ?? "none");
+  check("Tasks waiting only on a tool hang off the goal (the trail doesn't ask about tools)", anchorOf("cold_outbound") === "goal_detail", anchorOf("cold_outbound") ?? "none");
 
   await syncMap(workspace.id);
   check("Syncing again changes nothing", (await getMapNodes(workspace.id)).length === nodes.length);

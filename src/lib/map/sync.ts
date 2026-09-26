@@ -3,8 +3,8 @@ import { z } from "zod";
 import { models } from "@/lib/ai/models";
 import { getSpec, type PloybookSpec } from "@/lib/catalog";
 import type { Doc, MapNode, Workspace } from "@/lib/db/types";
-import { getDocs, getIntegrations, getMapNodes, getPloys, getWorkspace, insertMapNodes } from "@/lib/db/workspaces";
-import { anchorFor, plannedTemplates, toolToAsk } from "./plan";
+import { getDocs, getMapNodes, getPloys, getWorkspace, insertMapNodes } from "@/lib/db/workspaces";
+import { anchorFor, plannedTemplates } from "./plan";
 import { mapFocus } from "./state";
 
 const copySchema = z.object({
@@ -45,20 +45,17 @@ ${specs.map((s) => `- ${s.id}: ${s.name}. ${s.goal}`).join("\n")}`,
 }
 
 async function doSync(workspaceId: string) {
-  const [workspace, docs, ploys, nodes, integrations] = await Promise.all([
+  const [workspace, docs, ploys, nodes] = await Promise.all([
     getWorkspace(workspaceId),
     getDocs(workspaceId),
     getPloys(workspaceId),
     getMapNodes(workspaceId),
-    getIntegrations(workspaceId),
   ]);
   const focus = mapFocus(workspace, ploys);
   const quickWin = ploys.find((p) => p.spec?.source === "quick_win");
   const quickWinDone = quickWin?.status === "done";
   const onMap = new Set(nodes.map((n) => n.spec_id));
-  // Once they've connected a tool, the trail has asked its tool question.
-  const toolCategory = integrations.length ? null : toolToAsk({ workspace, ploys, mapNodes: nodes, integrations });
-  const anchorCtx = { workspace, docs, integrations, toolCategory, quickWinDone };
+  const anchorCtx = { workspace, docs, quickWinDone };
   // Slots are for levels along a region's path; the first deliverable sits with home base instead.
   const slotsUsed = (region: string) =>
     nodes.filter((n) => n.region === region && getSpec(n.spec_id)?.source === "template").length;

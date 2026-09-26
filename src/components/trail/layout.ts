@@ -147,7 +147,9 @@ export function useTrailLayout(messages: OnboardingUIMessage[], busy: boolean) {
   const byRow = new Map<string, MapNode[]>();
   for (const node of mapNodes) {
     if (getSpec(node.spec_id)?.source === "quick_win") continue; // shown as the build node
-    const anchor = node.anchor ? (legacyAnchors[node.anchor] ?? node.anchor) : node.region === "site_brand" ? "site" : "goal_detail";
+    // An old anchor moves to where it sits now, unless its row is still on this trail (an old conversation).
+    const raw = node.anchor ?? (node.region === "site_brand" ? "site" : "goal_detail");
+    const anchor = keys.has(raw) ? raw : (legacyAnchors[raw] ?? raw);
     const key = keys.has(anchor) ? anchor : done ? "end" : null;
     if (key) byRow.set(key, [...(byRow.get(key) ?? []), node]);
   }

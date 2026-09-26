@@ -131,10 +131,6 @@ export function Trail({
     return { left: cards.filter((_, i) => i % 2 === 1), right: cards.filter((_, i) => i % 2 === 0) };
   };
 
-  const all = [...states.values()];
-  const ready = all.filter((s) => s.state === "available").length;
-  const finished = all.filter((s) => s.state === "done" || s.state === "live").length;
-
   const scrollKey = `${rows.length}:${workspace.crawl?.status}:${workspace.crawl?.pages.length}:${mapNodes.length}`;
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -157,9 +153,6 @@ export function Trail({
                 Answer a few quick questions. Each answer unlocks tasks Ploy can do for you.
               </p>
             </div>
-            <p className="shrink-0 pt-1 text-[13px] text-muted">
-              <span className="font-medium text-ink">{ready}</span> ready · <span className="font-medium text-ink">{finished}</span> done
-            </p>
           </div>
 
           {rows.map((row) => {

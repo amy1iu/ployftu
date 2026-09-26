@@ -1,12 +1,11 @@
 import type { UIMessage } from "ai";
-import { contextItems, contextKeys, type ContextItemId } from "@/lib/catalog/context";
+import { contextItemIds, contextItems, contextKeys, type ContextItemId } from "@/lib/catalog/context";
 import { getIntent, type IntentId } from "@/lib/catalog/intents";
-import { integrationCategories, type IntegrationCategory } from "@/lib/catalog/integrations";
+import type { IntegrationCategory } from "@/lib/catalog/integrations";
 import { quickWins, type QuickWinId } from "@/lib/catalog/quick-wins";
 import type { Doc, Integration, MapNode, Ploy, Workspace } from "@/lib/db/types";
 import { cleanQuestion } from "@/lib/ai/onboarding/sentences";
 import { hasContext } from "@/lib/docs/profile";
-import { toolToAsk } from "@/lib/map/plan";
 
 // Getting Started is a trail of small questions, each answerable in under a
 // minute. The chat model plans it: each turn it picks the context item (see
@@ -78,7 +77,6 @@ const defaultGoals: Record<"site" | "noSite", IntentId[]> = {
 
 /** Saying you don't know counts as an answer; the trail moves on. */
 export const notSure: Chip = { label: "Not sure yet", value: "unsure" };
-export const skip: Chip = { label: "Skip for now", value: "skip" };
 export const soundsUnsure = (text: string) => /\b(not sure|no idea|don'?t know|dunno|idk|unsure)\b/i.test(text);
 
 /** The four goals most likely to fit (what their site suggests first), plus "not sure". */
@@ -126,25 +124,6 @@ export function quickWinChips(state: Pick<TrailState, "workspace" | "docs">): Ch
     .map((id) => ({ label: quickWins[id].label, value: id }));
 }
 
-/** The common tools for a capability, plus "skip". */
-export const toolChips = (category: IntegrationCategory): Chip[] => [
-  ...integrationCategories[category].tools.slice(0, 3).map((tool) => ({ label: tool, value: `${category}:${tool}` })),
-  skip,
-];
-
-/** How the old trail asked for each tool; a model hint, not a script. */
-export const toolQuestions: Record<IntegrationCategory, string> = {
-  email: "Where do you send email from today?",
-  crm: "Where do your leads and contacts live today?",
-  social: "Which social account matters most for you?",
-  search_ads: "Which search ads account do you use?",
-  social_ads: "Which social ads account do you use?",
-  analytics: "What do you use to track site visits?",
-  store: "Where do you sell online?",
-  team_chat: "Where does your team chat?",
-};
-
-const toolHint = "You'll connect it yourself when a task needs it. Ploy never connects without your approval.";
 
 export type TrailState = {
   workspace: Workspace;
@@ -165,15 +144,21 @@ export function nextQuestion(state: TrailState): QuestionData | "plan" | null {
   return "plan";
 }
 
+/**
+ * The items the trail asks about. The tool someone uses isn't one: they name
+ * it when they connect it, from the task that needs it. (`tool` stays in the
+ * registry so answers saved by earlier versions still record.)
+ */
+export const trailItems: readonly ContextItemId[] = contextItemIds.filter((id) => id !== "tool");
+
 /** Where an item stands, for the planner. `waiting`: the quick win, before any would be specific to them. */
-export type ItemStatus = "known" | "answered" | "inferred" | "reading" | "missing" | "unavailable" | "waiting";
+export type ItemStatus = "known" | "answered" | "inferred" | "reading" | "missing" | "waiting";
 
 export function itemStatus(id: ContextItemId, state: TrailState): ItemStatus {
   const item = contextItems[id];
   if (item.known(state)) return "known";
   // Said "not sure" or skipped: asked already.
   if (state.answered.has(id)) return "answered";
-  if (id === "tool" && !toolToAsk(state)) return "unavailable";
   if (id === "quick_win_offer" && !quickWinChips(state).length) return "waiting";
   if (item.inferred(state)) return "inferred";
   // Their site is being read and will say what they sell.
@@ -187,10 +172,6 @@ export function itemStatus(id: ContextItemId, state: TrailState): ItemStatus {
 export function chipOptions(id: ContextItemId, state: TrailState): Chip[] | null {
   if (id === "goal_detail") return goalChips(state.workspace);
   if (id === "quick_win_offer") return quickWinChips(state);
-  if (id === "tool") {
-    const category = toolToAsk(state);
-    return category ? toolChips(category) : [];
-  }
   return null;
 }
 
@@ -238,18 +219,15 @@ function openChips(id: ContextItemId, labels: string[]): Chip[] {
  * a tool when none is needed) finishes too; the eval counts how often.
  */
 export function toQuestion(planned: PlannedCard | null, state: TrailState): QuestionData | null {
-  if (!planned || planned.item === "website") return null;
+  if (!planned || planned.item === "website" || !trailItems.includes(planned.item)) return null;
   const { item } = planned;
   const quickWinRunning = contextItems.quick_win_offer.known(state);
   if (item === "quick_win_offer" && quickWinRunning) return null;
-  const category = item === "tool" ? toolToAsk(state) : null;
-  if (item === "tool" && !category) return null;
 
   const options = chipOptions(item, state);
   let chips = options ? pickChips(options, planned.chips) : openChips(item, planned.chips);
-  // "Not sure" and "skip" always stay on the goal and tool cards.
+  // "Not sure" always stays on the goal card.
   if (item === "goal_detail" && !chips.some((c) => c.value === notSure.value)) chips = [...chips, notSure];
-  if (item === "tool" && !chips.some((c) => c.value === skip.value)) chips = [...chips, skip];
 
   // Only quick wins that are ready are offered, beside the card or on their own.
   const ready = quickWinChips(state);
@@ -265,10 +243,10 @@ export function toQuestion(planned: PlannedCard | null, state: TrailState): Ques
       : null;
   return {
     slot: item,
-    question: cleanQuestion(planned.question) || (category ? toolQuestions[category] : "What should I know next?"),
-    hint: item === "tool" ? toolHint : planned.hint,
+    question: cleanQuestion(planned.question) || "What should I know next?",
+    hint: planned.hint,
     chips,
-    category,
+    category: null,
     alt,
     offScript: false,
   };
