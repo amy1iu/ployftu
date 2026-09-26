@@ -49,6 +49,22 @@ export const profileDocs = [
 ] as const;
 
 export type ProfileDocSlug = (typeof profileDocs)[number]["slug"];
+
+// Profile sections the user fills in as the conversation goes. Anything they
+// tell us about these, at any point, is written into the Docs as confirmed.
+export const noteSections = [
+  ["business-overview", "what-we-do", "what the business does"],
+  ["business-overview", "offering", "their products or services, and pricing"],
+  ["business-overview", "who-we-serve", "who their customers are"],
+  ["business-overview", "differentiators", "what makes them different from competitors"],
+  ["goals-and-focus", "challenges", "problems or frustrations with marketing and growth"],
+  ["goals-and-focus", "constraints", "limits on budget, time, team, or compliance that rule things in or out"],
+  ["channels-and-tools", "acquisition", "how customers find them today (channels)"],
+  ["channels-and-tools", "outreach", "how they reach out to or follow up with prospects today"],
+  ["channels-and-tools", "tools", "software and services they use (CRM, email, store, ads, analytics)"],
+  ["brand-guidelines", "voice", "how their brand should sound"],
+] as const satisfies readonly (readonly [ProfileDocSlug, string, string])[];
+
 export type SectionStatus = "empty" | "inferred" | "confirmed";
 export type SectionMeta = { status: SectionStatus; source: "website" | "user" | null; updatedAt: string | null };
 

@@ -7,6 +7,9 @@ export const models = {
   chat,
   // Recording the user's answers: precision matters more than speed (runs in parallel with the reply).
   extract: process.env.AI_MODEL_EXTRACT ?? "openai/gpt-4.1",
+  // Typed decisions on the trail (what an answer means, what to ask next): a
+  // decision model that returns probabilities, not text. See ai/jev.ts.
+  decide: process.env.AI_MODEL_DECIDE ?? "typesafe-ai/jev",
   // Small background jobs (reply chips): a fast non-reasoning model.
   fast: process.env.AI_MODEL_FAST ?? "openai/gpt-4.1-mini",
   // Only applies to OpenAI reasoning models (gpt-5*).
