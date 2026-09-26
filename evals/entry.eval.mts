@@ -12,9 +12,10 @@ import { generateText, Output, readUIMessageStream, type UIMessageChunk } from "
 import { z } from "zod";
 import { onboardingTurn, type OnboardingUIMessage } from "@/lib/ai/onboarding";
 import { getSpec } from "@/lib/catalog";
+import { contextItemIds, contextItems, type ContextItemId, type ContextState } from "@/lib/catalog/context";
 import { getIntent, type IntentId } from "@/lib/catalog/intents";
 import { quickWins, type QuickWinId } from "@/lib/catalog/quick-wins";
-import { createWorkspace, getDocs, getMapNodes, getPloys, getWorkspace } from "@/lib/db/workspaces";
+import { createWorkspace, getDocs, getIntegrations, getMapNodes, getPloys, getWorkspace } from "@/lib/db/workspaces";
 import { readSection } from "@/lib/docs/markdown";
 import { syncMap } from "@/lib/map/sync";
 import { entryBranch } from "@/lib/onboarding/entry";
@@ -95,15 +96,39 @@ Tap a chip when one says what you'd say; otherwise type a short reply (1-2 sente
     : { text: (output.text ?? output.chip ?? "").trim() || "not sure", metadata: { slot } };
 }
 
-/** Runs one real step and times the next question. */
+/** The registry items a card asks about (the fork's two cards ask two). Older trails named them differently. */
+const legacy: Record<string, ContextItemId> = { sell: "business_model", followup: "target_customer", goal: "goal_detail", fork: "goal_detail", quick_win: "quick_win_offer" };
+const itemOf = (slot: string) => legacy[slot] ?? (slot as ContextItemId);
+const itemsAsked = (q: QuestionData) => [itemOf(q.slot), ...(q.alt ? [itemOf(q.alt.slot)] : [])];
+
+/** Which registry items are known right now. */
+async function knownNow(workspaceId: string) {
+  const [workspace, docs, ploys, integrations] = await Promise.all([
+    getWorkspace(workspaceId),
+    getDocs(workspaceId),
+    getPloys(workspaceId),
+    getIntegrations(workspaceId),
+  ]);
+  const state: ContextState = { workspace, docs, ploys, integrations };
+  return new Set(contextItemIds.filter((id) => contextItems[id].known(state)));
+}
+
+/**
+ * Runs one real step: times the next question and the whole turn (until the
+ * stream finishes), and snapshots what was known when the question went up.
+ */
 async function runTurn(workspaceId: string, messages: OnboardingUIMessage[]) {
   const started = performance.now();
   let questionAt: number | null = null;
+  let knownAtAsk: Promise<Set<ContextItemId>> | null = null;
   const { stream, background } = await onboardingTurn({ workspaceId, messages, onSaved: async () => {}, sideEffects: false });
   const timed = stream.pipeThrough(
     new TransformStream<UIMessageChunk, UIMessageChunk>({
       transform(chunk, controller) {
-        if (chunk.type === "data-question" && questionAt === null) questionAt = performance.now() - started;
+        if (chunk.type === "data-question" && questionAt === null) {
+          questionAt = performance.now() - started;
+          knownAtAsk = knownNow(workspaceId);
+        }
         controller.enqueue(chunk);
       },
     }),
@@ -111,8 +136,9 @@ async function runTurn(workspaceId: string, messages: OnboardingUIMessage[]) {
   let reply: OnboardingUIMessage | undefined;
   for await (const message of readUIMessageStream<OnboardingUIMessage>({ stream: timed })) reply = message;
   if (!reply) throw new Error("No reply");
+  const turnMs = performance.now() - started;
   await background;
-  return { reply, nextQuestionMs: questionAt };
+  return { reply, nextQuestionMs: questionAt, turnMs, knownAtAsk: knownAtAsk ? await knownAtAsk : null };
 }
 
 /** The first deliverables that fit the persona: its goal's (a landing page without a site), or the starter for "not sure". */
@@ -139,6 +165,8 @@ async function runPersona(persona: Persona) {
   const workspace = await createWorkspace({ isEval: true });
   const messages: OnboardingUIMessage[] = [greetingMessage()];
   const timings: number[] = [];
+  // Per user turn: wall time, whether it was a chip tap, and what was known when its question went up.
+  const turns: { ms: number; chip: boolean; knownAtAsk: Set<ContextItemId> | null }[] = [];
 
   try {
     for (let turn = 1; turn <= MAX_USER_TURNS; turn++) {
@@ -146,9 +174,10 @@ async function runPersona(persona: Persona) {
       if (!asked) break;
       const move = await simulateUser(persona, messages, asked);
       messages.push({ id: `u${turn}`, role: "user", parts: [{ type: "text", text: move.text }], metadata: move.metadata });
-      const { reply, nextQuestionMs } = await runTurn(workspace.id, messages);
+      const { reply, nextQuestionMs, turnMs, knownAtAsk } = await runTurn(workspace.id, messages);
       messages.push(reply);
       if (nextQuestionMs !== null) timings.push(nextQuestionMs);
+      turns.push({ ms: turnMs, chip: move.metadata.value !== undefined, knownAtAsk });
     }
 
     await syncMap(workspace.id); // the eval skips side effects; place the tasks now
@@ -163,13 +192,23 @@ async function runPersona(persona: Persona) {
     const doc = (slug: string) => docs.find((d) => d.slug === slug)!;
 
     // What the trail asked: every card, and whether its slot was already answered at the time.
-    const questions: { slot: string; question: string; chips: number; reask: boolean }[] = [];
+    // reaskKnown: an item whose known() was already true when the card went up (the greeting's website card never is).
+    const questions: { slot: string; question: string; chips: number; reask: boolean; reaskKnown: boolean }[] = [];
+    let userTurn = 0;
     messages.forEach((m, i) => {
+      if (m.role === "user") userTurn++;
       const q = part<QuestionData>(m, "data-question");
       if (!q) return;
-      const before = answeredSlots(messages.slice(0, i + 1));
-      const slots = q.slot === "fork" ? ["goal", "quick_win"] : [q.slot];
-      questions.push({ slot: q.slot, question: q.question, chips: q.chips.length, reask: slots.some((s) => before.has(s as AnsweredSlot)) });
+      const before = new Set([...answeredSlots(messages.slice(0, i + 1))].map(itemOf));
+      const items = itemsAsked(q);
+      const known = i === 0 ? null : turns[userTurn - 1]?.knownAtAsk;
+      questions.push({
+        slot: q.slot,
+        question: q.question,
+        chips: q.chips.length,
+        reask: items.some((s) => before.has(s)),
+        reaskKnown: !!known && items.some((s) => known.has(s)),
+      });
     });
     const answers = messages.flatMap((m) => {
       const a = part<AnsweredData>(m, "data-answered");
@@ -177,7 +216,7 @@ async function runPersona(persona: Persona) {
     });
 
     const quickWin = ploys.find((p) => p.spec?.source === "quick_win");
-    const picked = answers.some((a) => a.slot === "quick_win");
+    const picked = answers.some((a) => itemOf(a.slot) === "quick_win_offer");
     const onMap = nodes.filter((n) => getSpec(n.spec_id)?.source === "template").map((n) => n.spec_id);
     const fit = expectedTemplates(persona, entry.goals.intents[0]?.id);
 
@@ -190,11 +229,29 @@ async function runPersona(persona: Persona) {
       goalsSection: doc("goals-and-focus").sections.goals?.status === "confirmed",
     };
 
+    // The planner's metrics: does it stop at the right time, re-ask what's known, get to the first win fast?
+    const finished = !openQuestion(messages);
+    const knownAtEnd = await knownNow(workspace.id);
+    const told = (id: ContextItemId) => knownAtEnd.has(id) || answers.some((a) => itemOf(a.slot) === id);
+    const userTurns = messages.filter((m) => m.role === "user");
+    const startedAt = messages.findIndex((m) => !!part(m, "data-taskStarted"));
+    const spike = {
+      reaskedKnown: questions.filter((q) => q.reaskKnown).length,
+      questionsToDone: finished ? questions.length : null,
+      stoppedEarly: finished && !(told("goal_detail") && told("target_customer")),
+      neverStopped: !finished,
+      turnsToQuickWin: startedAt === -1 ? null : messages.slice(0, startedAt).filter((m) => m.role === "user").length,
+      msPerTurn: { p50: Math.round(percentile(turns.map((t) => t.ms), 50)), p95: Math.round(percentile(turns.map((t) => t.ms), 95)) },
+      chipTapMs: { p50: Math.round(percentile(turns.filter((t) => t.chip).map((t) => t.ms), 50)) },
+    };
+
     return {
       id: persona.id,
       expected: expect.branch,
       branch: entryBranch(entry),
-      finished: !openQuestion(messages),
+      finished,
+      userTurns: userTurns.length,
+      spike,
       questions,
       answers,
       quickWin: quickWin?.spec?.id ?? null,
@@ -219,6 +276,7 @@ async function runPersona(persona: Persona) {
       taskRecall: fit.length ? fit.filter((id) => onMap.includes(id)).length / fit.length : null,
       docChecks,
       timings,
+      turnTimings: turns.map((t) => ({ ms: Math.round(t.ms), chip: t.chip })),
       transcript: transcript(messages),
     };
   } finally {
@@ -291,6 +349,21 @@ const metrics = [
   { name: "Personas that errored", value: results.length - ok.length, max: 0 },
 ];
 
+// The planner spike's metrics (reported, not gated).
+const allTurns = ok.flatMap((r) => r.turnTimings);
+const done = ok.map((r) => r.spike.questionsToDone).filter((v): v is number => v !== null);
+const toWin = ok.map((r) => r.spike.turnsToQuickWin).filter((v): v is number => v !== null);
+const spikeMetrics = {
+  reaskedKnown: ok.reduce((n, r) => n + r.spike.reaskedKnown, 0),
+  questionsToDone: { median: percentile(done, 50), mean: +mean(done).toFixed(2), n: done.length },
+  stoppedEarly: ok.filter((r) => r.spike.stoppedEarly).length,
+  neverStopped: ok.filter((r) => r.spike.neverStopped).length,
+  turnsToQuickWin: { median: percentile(toWin, 50), mean: +mean(toWin).toFixed(2), n: toWin.length, never: ok.length - toWin.length },
+  msPerTurn: { p50: Math.round(percentile(allTurns.map((t) => t.ms), 50)), p95: Math.round(percentile(allTurns.map((t) => t.ms), 95)) },
+  chipTapMs: { p50: Math.round(percentile(allTurns.filter((t) => t.chip).map((t) => t.ms), 50)), n: allTurns.filter((t) => t.chip).length },
+  personas: ok.length,
+};
+
 console.log("\nTrail gates");
 let allPass = true;
 for (const m of metrics) {
@@ -300,8 +373,15 @@ for (const m of metrics) {
   console.log(`  ${pass ? "✓" : "✗"} ${m.name.padEnd(46)} ${shown}`);
 }
 
+console.log("\nPlanner metrics (not gated)");
+for (const r of ok)
+  console.log(
+    `  ${r.id.padEnd(28)} reaskedKnown ${r.spike.reaskedKnown}  questionsToDone ${r.spike.questionsToDone ?? "-"}  stoppedEarly ${r.spike.stoppedEarly}  neverStopped ${r.spike.neverStopped}  turnsToQuickWin ${r.spike.turnsToQuickWin ?? "-"}  msPerTurn ${r.spike.msPerTurn.p50}/${r.spike.msPerTurn.p95}  chipTapMs ${r.spike.chipTapMs.p50}`,
+  );
+console.log(`  ALL ${JSON.stringify(spikeMetrics)}`);
+
 await mkdir("evals/results", { recursive: true });
 const file = `evals/results/entry-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-await writeFile(file, JSON.stringify({ metrics, results }, null, 2));
+await writeFile(file, JSON.stringify({ metrics, spikeMetrics, results }, null, 2));
 console.log(`\n${allPass ? "All gates pass." : "Some gates fail."} Full transcripts: ${file}`);
 process.exit(allPass ? 0 : 1);
