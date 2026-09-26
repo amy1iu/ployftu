@@ -13,7 +13,7 @@ const steps: { label: string; match: (e: Event) => boolean }[] = [
   { label: "Answered the website question", match: (e) => e.name === "website_answered" },
   { label: "Answered the goals question", match: (e) => e.name === "goals_answered" },
   { label: "Path set (both answered)", match: (e) => e.name === "branch_resolved" },
-  { label: "Picked a quick win or a goal", match: (e) => e.name === "question_answered" && ["goal", "quick_win"].includes(String(e.props.slot)) },
+  { label: "Picked a quick win or a goal", match: (e) => e.name === "question_answered" && ["goal", "quick_win", "goal_detail", "quick_win_offer"].includes(String(e.props.slot)) },
   { label: "First deliverable started", match: (e) => e.name === "quick_win_started" },
   { label: "First deliverable ready", match: (e) => e.name === "quick_win_done" },
   { label: "Started a task on the map", match: (e) => e.name === "level_started" },

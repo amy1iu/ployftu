@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { entryUpdateSchema } from "@/lib/ai/onboarding/extract";
 import { profileNotesSchema } from "@/lib/ai/onboarding/profile-notes";
-import { replySchema } from "@/lib/ai/onboarding/reply";
+import { turnSchema } from "@/lib/ai/onboarding/reply";
 import { siteSummarySchema } from "@/lib/site/summarize";
 import { agentTools, allSpecs, getSpec, integrationCategoryIds, intents, primitives, quickWins, regionIds, regions } from ".";
 
@@ -58,7 +58,7 @@ function optionalProperties(schema: z.ZodType) {
 describe("schemas are OpenAI strict-mode compatible", () => {
   const schemas: [string, z.ZodType][] = [
     ["entry extraction", entryUpdateSchema],
-    ["onboarding reply", replySchema],
+    ["onboarding turn", turnSchema],
     ["profile notes", profileNotesSchema],
     ["site summary", siteSummarySchema],
     ...Object.entries(quickWins).map(([id, q]) => [`quick win ${id}`, q.output] as [string, z.ZodType]),

@@ -19,7 +19,7 @@ describe("anchorFor", () => {
   });
 
   it("hangs a task beside the question whose answer it's waiting on", () => {
-    expect(anchor("lead_list", { docs: profileWith("offering") })).toBe("followup");
+    expect(anchor("lead_list", { docs: profileWith("offering") })).toBe("target_customer");
     expect(anchor("cold_outbound", { toolCategory: "email" })).toBe("tool");
   });
 
@@ -27,8 +27,13 @@ describe("anchorFor", () => {
     expect(anchor("homepage_refresh", { docs: profileWith() })).toBe("site");
   });
 
+  it("hangs a task waiting on what they sell beside that card when there's no site to read", () => {
+    const noSite = { ...workspace, entry: { ...workspace.entry, website: { status: "none", url: null } } } as Workspace;
+    expect(anchor("homepage_refresh", { workspace: noSite, docs: profileWith() })).toBe("business_model");
+  });
+
   it("otherwise hangs a task off whatever revealed it", () => {
-    expect(anchor("lead_list")).toBe("goal");
+    expect(anchor("lead_list")).toBe("goal_detail");
     expect(anchor("homepage_refresh")).toBe("site");
     expect(anchor("site_dashboard", { quickWinDone: true })).toBe("build");
   });

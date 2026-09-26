@@ -1,26 +1,27 @@
 import type { UIMessage } from "ai";
+import { contextItems, type ContextItemId } from "@/lib/catalog/context";
 import { getIntent, type IntentId } from "@/lib/catalog/intents";
 import { integrationCategories, type IntegrationCategory } from "@/lib/catalog/integrations";
 import { quickWins, type QuickWinId } from "@/lib/catalog/quick-wins";
 import type { Doc, Integration, MapNode, Ploy, Workspace } from "@/lib/db/types";
-import { hasContext } from "@/lib/docs/profile";
+import { cleanQuestion } from "@/lib/ai/onboarding/sentences";
 import { toolToAsk } from "@/lib/map/plan";
-import { topIntent } from "./entry";
 
 // Getting Started is a trail of small questions, each answerable in under a
-// minute. The code picks the next one, always in this order, skipping any whose
-// answer we already have (from their site or an earlier answer):
+// minute. The chat model plans it: each turn it picks the context item (see
+// the registry in catalog/context) that unlocks the most for this business
+// next, writes the card, or finishes. Code enforces only two rules: the
+// website comes first (it's the fastest way in), and the trail stops after
+// MAX_ANSWERED answers. Ordering, never re-asking, offering the quick win
+// early, and when to stop are the prompt's job, measured by the entry eval.
 //
-//   website → sell (no site) → fork: a quick win or a goal → the other one →
-//   followup (who they want to reach) → tool (what the most tasks need) → done
-//
-// Chips carry values, so tapping one records the answer exactly, with no model
-// call. Typed answers go through the extractor.
+// Chips carry values, so tapping one records the answer exactly, with no
+// extraction. Where chip values drive code (goals, quick wins, tools), code
+// supplies the options and the model only picks, orders, and words them.
+// Typed answers go through the extractor.
 
-/** A question on the trail. `fork` offers two at once: a goal, or a quick win. */
-export type QuestionSlot = "website" | "sell" | "fork" | "goal" | "followup" | "tool";
-/** What an answer records; answering the fork records `goal` or `quick_win`. */
-export type AnsweredSlot = Exclude<QuestionSlot, "fork"> | "quick_win";
+/** What an answer records: a registry item. Answering the fork's quick-win card records `quick_win_offer`. */
+export type AnsweredSlot = ContextItemId;
 
 export type Chip = { label: string; value: string };
 
@@ -28,11 +29,12 @@ type Card = { question: string; hint: string | null; chips: Chip[] };
 
 /** A question as the trail shows it (the `data-question` part). */
 export type QuestionData = Card & {
-  slot: QuestionSlot;
+  /** The item it asks about. */
+  slot: ContextItemId;
   /** The tool question's capability. */
   category: IntegrationCategory | null;
-  /** The fork's second card: a quick win. */
-  alt: (Card & { slot: "quick_win" }) | null;
+  /** A second card offered alongside (the fork): a quick win. */
+  alt: (Card & { slot: "quick_win_offer" }) | null;
   /** The message before it replies to something off-script. */
   offScript: boolean;
 };
@@ -44,32 +46,15 @@ export type AnsweredData = { slot: AnsweredSlot; summary: string };
 export type TrailMetadata = { slot?: AnsweredSlot; value?: string; redo?: boolean };
 
 /** Answers that can be changed later. A quick win, once started, can't. */
-export const canRedo = (slot: AnsweredSlot) => slot !== "quick_win";
+export const canRedo = (slot: AnsweredSlot) => slot !== "quick_win_offer";
 
-/**
- * The next question, before any model wording. `question: null` or
- * `chips: null` means the model writes them (the follow-up, which is specific
- * to their business); `guide` tells it what to ask.
- */
-export type NextQuestion = Omit<QuestionData, "question" | "chips" | "offScript"> & {
-  question: string | null;
-  chips: Chip[] | null;
-  guide: string;
-};
+/** The trail ends after this many answers (the website included), whatever the model plans. */
+export const MAX_ANSWERED = 6;
 
 /** A question's core, without lead-ins like "While that builds:". */
 export const essence = (question: string) => {
   const core = question.replace(/^[^:?]{1,30}:\s*/, "");
   return core.charAt(0).toUpperCase() + core.slice(1);
-};
-
-export const slotLabels: Record<AnsweredSlot, string> = {
-  website: "Website",
-  sell: "Business",
-  goal: "Goal",
-  quick_win: "Quick win",
-  followup: "Customers",
-  tool: "Tools",
 };
 
 export const websiteQuestion = (): QuestionData => ({
@@ -92,26 +77,21 @@ const defaultGoals: Record<"site" | "noSite", IntentId[]> = {
 
 /** Saying you don't know counts as an answer; the trail moves on. */
 export const notSure: Chip = { label: "Not sure yet", value: "unsure" };
+export const skip: Chip = { label: "Skip for now", value: "skip" };
 export const soundsUnsure = (text: string) => /\b(not sure|no idea|don'?t know|dunno|idk|unsure)\b/i.test(text);
 
 /** The four goals most likely to fit (what their site suggests first), plus "not sure". */
-export function goalChips(workspace: Workspace): Chip[] {
+export function goalChips(workspace: Pick<Workspace, "entry" | "crawl">): Chip[] {
   const suggested = (workspace.crawl?.opportunities ?? []).map((o) => o.intent);
   const defaults = defaultGoals[workspace.entry.website.status === "has" ? "site" : "noSite"];
   const picks = [...new Set([...suggested, ...defaults])].slice(0, 4);
   return [...picks.map((id) => ({ label: getIntent(id).label, value: id })), notSure];
 }
 
-/** The follow-up's chips: the model's guesses at who they sell to, plus "not sure". */
-export const followupChips = (labels: string[]): Chip[] => [
-  ...labels.slice(0, 3).map((label) => ({ label, value: label })),
-  notSure,
-];
-
 const quickWinOrder: QuickWinId[] = ["homepage_audit", "outreach_sequence", "lookalike_accounts", "social_posts", "landing_page_draft"];
 
 /** Three quick wins that fit: a homepage audit when they have a site, a landing page when they don't. */
-export function quickWinChips(workspace: Workspace): Chip[] {
+export function quickWinChips(workspace: Pick<Workspace, "entry" | "crawl">): Chip[] {
   const hasSite = workspace.entry.website.status === "has";
   const suggested = (workspace.crawl?.opportunities ?? []).map((o) => getIntent(o.intent).quickWin);
   const first: QuickWinId[] = hasSite ? ["homepage_audit"] : ["landing_page_draft"];
@@ -121,7 +101,14 @@ export function quickWinChips(workspace: Workspace): Chip[] {
     .map((id) => ({ label: quickWins[id].label, value: id }));
 }
 
-const toolQuestions: Record<IntegrationCategory, string> = {
+/** The common tools for a capability, plus "skip". */
+export const toolChips = (category: IntegrationCategory): Chip[] => [
+  ...integrationCategories[category].tools.slice(0, 3).map((tool) => ({ label: tool, value: `${category}:${tool}` })),
+  skip,
+];
+
+/** How the old trail asked for each tool; a model hint, not a script. */
+export const toolQuestions: Record<IntegrationCategory, string> = {
   email: "Where do you send email from today?",
   crm: "Where do your leads and contacts live today?",
   social: "Which social account matters most for you?",
@@ -132,13 +119,7 @@ const toolQuestions: Record<IntegrationCategory, string> = {
   team_chat: "Where does your team chat?",
 };
 
-const goalCard = (workspace: Workspace, lead = ""): Card => ({
-  question: `${lead}What do you most want to grow in the next few months?`,
-  hint: "Reveals the tasks that move it.",
-  chips: goalChips(workspace),
-});
-
-const base = { category: null, alt: null } as const;
+const toolHint = "You'll connect it yourself when a task needs it. Ploy never connects without your approval.";
 
 export type TrailState = {
   workspace: Workspace;
@@ -149,102 +130,128 @@ export type TrailState = {
   answered: ReadonlySet<AnsweredSlot>;
 };
 
-/** The next question on the trail, or null once there's nothing left to ask. */
-export function nextQuestion(state: TrailState): NextQuestion | null {
-  const { workspace, docs, ploys, answered } = state;
-  const { entry, crawl } = workspace;
-  const pick = (slot: AnsweredSlot) => !answered.has(slot);
+/**
+ * The next question, as far as code decides: the website first, nothing past
+ * the cap, and otherwise `"plan"`: the model picks (see toQuestion).
+ */
+export function nextQuestion(state: TrailState): QuestionData | "plan" | null {
+  if (state.workspace.entry.website.status === "unknown" && !state.answered.has("website")) return websiteQuestion();
+  if (state.answered.size >= MAX_ANSWERED) return null;
+  return "plan";
+}
 
-  if (entry.website.status === "unknown" && pick("website")) {
-    const { question, hint, chips } = websiteQuestion();
-    return { ...base, slot: "website", question, hint, chips, guide: "Ask for their website." };
-  }
+/** Where an item stands, for the planner. */
+export type ItemStatus = "known" | "answered" | "inferred" | "reading" | "missing" | "unavailable";
 
-  const noSite = entry.website.status !== "has" || crawl?.status === "failed";
-  if (noSite && !hasContext(docs, "offering") && pick("sell")) {
-    const unreadable = entry.website.status === "unreadable" || crawl?.status === "failed";
-    return {
-      ...base,
-      slot: "sell",
-      question: "In a sentence, what does your business sell?",
-      hint: unreadable ? "I couldn't read your site, so a sentence from you is the fastest way in." : null,
-      chips: [],
-      guide: "Ask what their business sells, in a sentence.",
-    };
-  }
+export function itemStatus(id: ContextItemId, state: TrailState): ItemStatus {
+  const item = contextItems[id];
+  if (item.known(state)) return "known";
+  // Said "not sure" or skipped: asked already.
+  if (state.answered.has(id)) return "answered";
+  if (id === "tool" && !toolToAsk(state)) return "unavailable";
+  if (item.inferred(state)) return "inferred";
+  // Their site is being read and will say what they sell.
+  const { website } = state.workspace.entry;
+  const crawl = state.workspace.crawl;
+  if (id === "business_model" && website.status === "has" && crawl?.status !== "failed") return "reading";
+  return "missing";
+}
 
-  const hasQuickWin = ploys.some((p) => p.spec?.source === "quick_win");
-  const goalUnknown = entry.goals.status === "unknown";
-  if (goalUnknown && !hasQuickWin && pick("goal") && pick("quick_win")) {
-    return {
-      slot: "fork",
-      ...goalCard(workspace),
-      category: null,
-      alt: {
-        slot: "quick_win",
-        question: "Want something useful in the next few minutes?",
-        hint: "Pick one and I'll start right away.",
-        chips: quickWinChips(workspace),
-      },
-      guide: "Ask what they most want to grow.",
-    };
-  }
-  if (goalUnknown && pick("goal"))
-    return { ...base, slot: "goal", ...goalCard(workspace, "While that builds: "), guide: "Ask what they most want to grow." };
-
-  // Their site says who buys today; who they want to reach for this goal is theirs to say.
-  if (!hasContext(docs, "audience", { confirmed: true }) && pick("followup")) {
-    const intent = topIntent(entry);
-    const ask = intent ? getIntent(intent).audienceQuestion : "Who are your best customers?";
-    return {
-      ...base,
-      slot: "followup",
-      question: null,
-      hint: "So everything Ploy makes speaks to them.",
-      chips: null,
-      guide: `Ask who they most want to reach, adapting this to their business and goal: "${ask}"`,
-    };
-  }
-
-  const category = pick("tool") ? toolToAsk(state) : null;
-  if (category) {
-    const { tools } = integrationCategories[category];
-    return {
-      ...base,
-      slot: "tool",
-      category,
-      question: toolQuestions[category],
-      hint: "You'll connect it yourself when a task needs it. Ploy never connects without your approval.",
-      chips: [
-        ...tools.slice(0, 3).map((tool) => ({ label: tool, value: `${category}:${tool}` })),
-        { label: "Skip for now", value: "skip" },
-      ],
-      guide: `Ask which ${integrationCategories[category].name.toLowerCase()} tool they use.`,
-    };
+/** The chips an item's card must use, when their values drive code; null when the model writes them. */
+export function chipOptions(id: ContextItemId, state: TrailState): Chip[] | null {
+  if (id === "goal_detail") return goalChips(state.workspace);
+  if (id === "quick_win_offer") return quickWinChips(state.workspace);
+  if (id === "tool") {
+    const category = toolToAsk(state);
+    return category ? toolChips(category) : [];
   }
   return null;
+}
+
+/** The card as the model planned it (the planner turn's `next`). */
+export type PlannedCard = {
+  item: ContextItemId;
+  question: string;
+  hint: string | null;
+  chips: string[];
+  alt: { question: string; hint: string | null; chips: string[] } | null;
+};
+
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * The model's chips mapped onto fixed options: "2. Get more demo bookings"
+ * (option 2, relabeled) or an option's label. Anything else is dropped; with
+ * fewer than two left, all the options show as they are.
+ */
+export function pickChips(options: Chip[], wanted: string[]): Chip[] {
+  const picked: Chip[] = [];
+  for (const raw of wanted) {
+    const numbered = /^\s*(\d+)\s*[.):-]\s*(.*)$/.exec(raw);
+    const text = (numbered ? numbered[2] : raw).trim();
+    const option = (numbered && options[Number(numbered[1]) - 1]) || options.find((o) => norm(o.label) === norm(text));
+    if (!option || picked.some((p) => p.value === option.value)) continue;
+    picked.push({ label: text || option.label, value: option.value });
+  }
+  return picked.length >= 2 ? picked : options;
+}
+
+/** The model's own chips for an open question: up to three, plus "not sure" (except for what they sell). */
+function openChips(id: ContextItemId, labels: string[]): Chip[] {
+  const own = [...new Set(labels.map((l) => l.trim()).filter((l) => l && !soundsUnsure(l) && !/^skip\b/i.test(l)))]
+    .slice(0, 3)
+    .map((label) => ({ label, value: label }));
+  return id === "business_model" ? own : [...own, notSure];
+}
+
+/**
+ * Turns the model's planned card into the question the trail shows, or null
+ * to finish. A pick code can't serve (the website again, a second quick win,
+ * a tool when none is needed) finishes too; the eval counts how often.
+ */
+export function toQuestion(planned: PlannedCard | null, state: TrailState): QuestionData | null {
+  if (!planned || planned.item === "website") return null;
+  const { item } = planned;
+  const quickWinRunning = contextItems.quick_win_offer.known(state);
+  if (item === "quick_win_offer" && quickWinRunning) return null;
+  const category = item === "tool" ? toolToAsk(state) : null;
+  if (item === "tool" && !category) return null;
+
+  const options = chipOptions(item, state);
+  let chips = options ? pickChips(options, planned.chips) : openChips(item, planned.chips);
+  // "Not sure" and "skip" always stay on the goal and tool cards.
+  if (item === "goal_detail" && !chips.some((c) => c.value === notSure.value)) chips = [...chips, notSure];
+  if (item === "tool" && !chips.some((c) => c.value === skip.value)) chips = [...chips, skip];
+
+  const alt =
+    planned.alt && item !== "quick_win_offer" && !quickWinRunning
+      ? {
+          slot: "quick_win_offer" as const,
+          question: cleanQuestion(planned.alt.question) || "Want something useful in the next few minutes?",
+          hint: planned.alt.hint ?? "Pick one and I'll start right away.",
+          chips: pickChips(quickWinChips(state.workspace), planned.alt.chips),
+        }
+      : null;
+  return {
+    slot: item,
+    question: cleanQuestion(planned.question) || (category ? toolQuestions[category] : "What should I know next?"),
+    hint: item === "tool" ? toolHint : planned.hint,
+    chips,
+    category,
+    alt,
+    offScript: false,
+  };
 }
 
 type Parts = UIMessage["parts"];
 const dataOf = <T,>(parts: Parts, type: string) =>
   parts.filter((p) => p.type === type).map((p) => (p as { data: T }).data);
 
-/** The latest question asked, if any. */
-export function lastQuestion(messages: UIMessage[]): QuestionData | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role !== "assistant") continue;
-    const [question] = dataOf<QuestionData>(messages[i].parts, "data-question");
-    if (question) return question;
-  }
-  return null;
-}
-
-/** The latest question that asked for a slot (the fork asks for the goal and the quick win). */
+/** The latest question that asked for a slot (the fork asks for two). */
 export function questionFor(messages: UIMessage[], slot: AnsweredSlot): QuestionData | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const [question] = dataOf<QuestionData>(messages[i].parts, "data-question");
-    if (question && (question.slot === slot || (question.slot === "fork" && (slot === "goal" || slot === "quick_win"))))
-      return question;
+    if (question && (question.slot === slot || question.alt?.slot === slot)) return question;
   }
   return null;
 }
@@ -253,11 +260,16 @@ export function questionFor(messages: UIMessage[], slot: AnsweredSlot): Question
 export const answeredSlots = (messages: UIMessage[]) =>
   new Set(messages.flatMap((m) => dataOf<AnsweredData>(m.parts, "data-answered").map((a) => a.slot)));
 
-/** The question on screen, if it hasn't been answered yet (none once the trail is done). */
+/**
+ * The question on screen, if it hasn't been answered yet (none once the trail
+ * is done). Only answers after it count: the planner may ask about an item
+ * again (e.g. after "not sure").
+ */
 export function openQuestion(messages: UIMessage[]): QuestionData | null {
-  const question = lastQuestion(messages);
-  if (!question) return null;
-  const answered = answeredSlots(messages);
-  const done = question.slot === "fork" ? answered.has("goal") || answered.has("quick_win") : answered.has(question.slot);
+  const at = messages.findLastIndex((m) => m.role === "assistant" && dataOf(m.parts, "data-question").length > 0);
+  if (at === -1) return null;
+  const [question] = dataOf<QuestionData>(messages[at].parts, "data-question");
+  const answered = answeredSlots(messages.slice(at + 1));
+  const done = answered.has(question.slot) || (!!question.alt && answered.has(question.alt.slot));
   return done ? null : question;
 }

@@ -3,8 +3,9 @@
 import { ArrowRight, ArrowUp, Check, ChevronDown, Globe, LoaderCircle, Map as MapIcon, Sparkles, X, Zap } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
+import { contextItems } from "@/lib/catalog/context";
 import type { Ploy } from "@/lib/db/types";
-import { canRedo, essence, slotLabels, type AnsweredSlot, type Chip, type QuestionData } from "@/lib/onboarding/trail";
+import { canRedo, essence, type AnsweredSlot, type Chip, type QuestionData } from "@/lib/onboarding/trail";
 import type { SiteCrawl } from "@/lib/site/types";
 import { Markdown } from "../markdown";
 
@@ -108,7 +109,7 @@ export function QuestionCard({
   );
 }
 
-/** The fork: a quick win now, or a bigger goal. Either way, the other comes next. */
+/** The fork: a quick win now, or the main question (usually their goal). */
 export function ForkCards({
   question,
   disabled,
@@ -126,14 +127,14 @@ export function ForkCards({
         <span className="flex items-center gap-1 text-[12px] text-muted">
           <Zap size={12} /> Quick win · ready in minutes
         </span>
-        <QuestionCard card={alt} slot="quick_win" disabled={disabled} onAnswer={onAnswer} width="w-[280px]" />
+        <QuestionCard card={alt} slot={alt.slot} disabled={disabled} onAnswer={onAnswer} width="w-[280px]" />
       </div>
       <span className="self-center bg-background px-1 text-[12px] text-subtle">or</span>
       <div className="flex flex-col items-center gap-1.5">
         <span className="flex items-center gap-1 text-[12px] text-muted">
-          <MapIcon size={12} /> Bigger goal · fills your map
+          <MapIcon size={12} /> {question.slot === "goal_detail" ? "Bigger goal" : contextItems[question.slot].label} · fills your map
         </span>
-        <QuestionCard card={question} slot="goal" disabled={disabled} onAnswer={onAnswer} width="w-[280px]" />
+        <QuestionCard card={question} slot={question.slot} disabled={disabled} onAnswer={onAnswer} width="w-[280px]" />
       </div>
     </div>
   );
@@ -208,7 +209,7 @@ export function AnsweredNode({
           </span>
         )}
         <span className={`flex max-w-full gap-2 ${expanded ? "mt-1 items-start" : "items-center"}`}>
-          <span className="shrink-0 text-[12px] leading-[19px] text-subtle">{slotLabels[slot]}</span>
+          <span className="shrink-0 text-[12px] leading-[19px] text-subtle">{contextItems[slot]?.label ?? slot}</span>
           <span className={expanded ? "leading-snug text-ink" : `truncate ${pending ? "text-muted" : "text-ink"}`}>
             {expanded ? (said ?? summary) : summary}
           </span>
@@ -242,7 +243,7 @@ export function AnsweredNode({
               Change answer
             </button>
           ) : (
-            slot === "quick_win" && <span className="ml-auto text-subtle">Already underway</span>
+            slot === "quick_win_offer" && <span className="ml-auto text-subtle">Already underway</span>
           )}
         </div>
       )}

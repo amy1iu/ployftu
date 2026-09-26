@@ -1,4 +1,5 @@
 import type { UIMessage } from "ai";
+import { contextItems } from "@/lib/catalog/context";
 import type { IntentId } from "@/lib/catalog/intents";
 import type { QuickWinId } from "@/lib/catalog/quick-wins";
 import { extractEntryUpdate } from "@/lib/ai/onboarding/extract";
@@ -39,10 +40,23 @@ function goalUpdate(value: string): EntryUpdate {
   };
 }
 
-const saveAudience = (workspaceId: string, body: string) =>
-  patchProfileSections(workspaceId, [
-    { slug: "business-overview", key: "who-we-serve", body, status: "confirmed", source: "user" },
-  ]);
+/**
+ * Records a profile-backed item (who they serve, what they sell, channels,
+ * constraints) in its sections, as theirs. What they do only fills in while
+ * empty: their site's fuller draft stays, and the answer lands in Offering.
+ */
+const saveItem = (workspaceId: string, slot: AnsweredSlot, body: string) =>
+  patchProfileSections(
+    workspaceId,
+    contextItems[slot].sections.map(({ doc, section }) => ({
+      slug: doc,
+      key: section,
+      body,
+      status: "confirmed" as const,
+      source: "user" as const,
+      ifEmpty: section === "what-we-do",
+    })),
+  );
 
 /**
  * Records the tool they use for a capability: on the workspace (so Connect can
@@ -78,23 +92,21 @@ async function applyChip(
     case "website":
       await applyEntryUpdate(workspace.id, { ...none, website: { status: chip.value as "none" | "not_live", url: null } }, { userTurns });
       return { ...answer, summary: chip.value === "none" ? "No site yet" : "Not live yet" };
-    case "sell":
-      await applyEntryUpdate(workspace.id, { ...none, business: { whatTheyDo: chip.label, whoTheyServe: null } }, { userTurns });
-      return answer;
-    case "goal":
+    case "goal_detail":
       await applyEntryUpdate(workspace.id, goalUpdate(chip.value), { userTurns });
       return answer;
-    case "quick_win":
+    case "quick_win_offer":
       return { ...answer, quickWin: chip.value as QuickWinId };
-    case "followup":
-      if (chip.value !== "unsure") await saveAudience(workspace.id, chip.label);
-      return answer;
     case "tool": {
       if (chip.value === "skip") return { ...answer, summary: "Skipped for now" };
       const [category, tool] = chip.value.split(":") as [IntegrationCategory, string];
       await rememberTool(workspace.id, category, tool);
       return { ...answer, summary: `Uses ${tool}` };
     }
+    default:
+      // A profile-backed item: the chip's words are the answer.
+      if (chip.value !== "unsure") await saveItem(workspace.id, slot, chip.label);
+      return answer;
   }
 }
 
@@ -117,8 +129,9 @@ export async function applyAnswer({
   userTurns: number;
 }): Promise<AppliedAnswer> {
   const meta = (message.metadata ?? {}) as TrailMetadata;
-  const slot: AnsweredSlot = asked.slot === "fork" ? (meta.slot === "quick_win" ? "quick_win" : "goal") : asked.slot;
-  const card = slot === "quick_win" && asked.alt ? asked.alt : asked;
+  // The fork has two cards; the quick win is the second.
+  const slot: AnsweredSlot = asked.alt && meta.slot === asked.alt.slot ? asked.alt.slot : asked.slot;
+  const card = slot === asked.alt?.slot ? asked.alt : asked;
 
   const chip = meta.value !== undefined ? card.chips.find((c) => c.value === meta.value) : undefined;
   // A bare URL for the website needs no model to read.
@@ -182,25 +195,23 @@ async function applyTyped(
       if (website.status === "has" && website.url) return answeredWith(hostOf(website.url));
       return answeredWith(website.status === "none" ? "No site yet" : website.status === "not_live" ? "Not live yet" : summary);
     }
-    case "sell":
-      return update.business?.whatTheyDo ? answeredWith(answer?.summary ?? update.business.whatTheyDo) : result;
-    case "goal":
+    case "goal_detail":
       if (update.goals) return answeredWith(update.goals.status === "unsure" ? "Not sure yet" : summary);
       if (matched) {
         await applyEntryUpdate(workspace.id, goalUpdate(matched.value), { userTurns });
         return answeredWith();
       }
       return result;
-    case "quick_win":
+    case "quick_win_offer":
       return matched ? { ...answeredWith(), quickWin: matched.value as QuickWinId } : result;
-    case "followup": {
+    case "target_customer": {
       // "All of the above" / "both" means every suggestion on the card.
       const all = /\b(all of (the|them|those|these)|all (the )?above|every(one|body) (above|listed)|both)\b/i.test(text)
         ? card.chips.filter((c) => c.value !== "unsure").map((c) => c.label).join(", ")
         : null;
       const who = update.business?.whoTheyServe ?? all ?? (gaveAnswer ? (answer?.summary ?? text) : null);
       if (!who) return soundsUnsure(text) ? answeredWith("Not sure yet") : result;
-      if (!update.business?.whoTheyServe) await saveAudience(workspace.id, who);
+      if (!update.business?.whoTheyServe) await saveItem(workspace.id, slot, who);
       return all ? answeredWith(all) : answeredWith();
     }
     case "tool": {
@@ -211,6 +222,14 @@ async function applyTyped(
       const tool = matched ? matched.value.split(":")[1] : (answer?.summary ?? text).slice(0, 40);
       await rememberTool(workspace.id, category, tool);
       return answeredWith(`Uses ${tool}`);
+    }
+    default: {
+      // A profile-backed item (what they sell, channels, constraints): their words go in its sections.
+      if (matched?.value === "unsure" || (!gaveAnswer && !matched && soundsUnsure(text))) return answeredWith("Not sure yet");
+      const said = matched?.label ?? (gaveAnswer ? text : null) ?? (slot === "business_model" ? update.business?.whatTheyDo : null);
+      if (!said) return result;
+      await saveItem(workspace.id, slot, said);
+      return answeredWith();
     }
   }
 }

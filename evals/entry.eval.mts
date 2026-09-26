@@ -48,7 +48,8 @@ function transcript(messages: OnboardingUIMessage[]) {
       if (m.role === "user") return `You: ${text(m)}`;
       const q = part<QuestionData>(m, "data-question");
       const lines = [text(m) && `Ploy: ${text(m)}`];
-      if (q?.alt) lines.push(`Ploy shows two cards. Quick win: ${card(q.alt)}  OR  Bigger goal: ${card(q)}`);
+      if (q?.alt)
+        lines.push(`Ploy shows two cards. Quick win: ${card(q.alt)}  OR  ${q.slot === "goal_detail" ? "Bigger goal" : "Main card"}: ${card(q)}`);
       else if (q) lines.push(`Ploy asks: ${card(q)}`);
       return lines.filter(Boolean).join("\n");
     })
@@ -89,7 +90,7 @@ Tap a chip when one says what you'd say; otherwise type a short reply (1-2 sente
   // In the app a chip belongs to its card, so find it on either one.
   const altChip = asked.alt?.chips.find((c) => c.label === output.chip);
   const onAlt = altChip ? true : output.card === "quick_win" && !!asked.alt;
-  const slot: AnsweredSlot = asked.slot === "fork" ? (onAlt ? "quick_win" : "goal") : asked.slot;
+  const slot: AnsweredSlot = onAlt && asked.alt ? asked.alt.slot : asked.slot;
   const chip = output.chip ? (altChip ?? asked.chips.find((c) => c.label === output.chip)) : undefined;
   return chip
     ? { text: chip.label, metadata: { slot, value: chip.value } }
@@ -341,7 +342,7 @@ const metrics = [
   { name: "Cards to finish (median)", value: percentile(cards, 50), max: 5 },
   { name: "Cards to finish (max)", value: Math.max(...cards), max: 6 },
   { name: "Questions of 15 words or fewer", ...rate(allQuestions.map((q) => words(q.question) <= 15)), target: 0.95 },
-  { name: "2-5 chips (or free text by design)", ...rate(allQuestions.map((q) => (q.slot === "sell" ? true : q.chips >= 2 && q.chips <= 5))), target: 0.95 },
+  { name: "2-5 chips (or free text by design)", ...rate(allQuestions.map((q) => (q.slot === "business_model" ? true : q.chips >= 2 && q.chips <= 5))), target: 0.95 },
   { name: "Re-asks an answered question", value: allQuestions.filter((q) => q.reask).length, max: 0 },
   { name: "Answers land in the right doc section", ...rate(ok.flatMap((r) => Object.values(r.docChecks))), target: 0.95 },
   { name: "Answer to next card p50 (ms)", value: Math.round(percentile(nextQuestion, 50)), max: 2000 },

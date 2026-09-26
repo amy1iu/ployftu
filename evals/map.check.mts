@@ -56,7 +56,7 @@ try {
   );
   check("Slots are unique per region", new Set(nodes.map((n) => `${n.region}/${n.slot}`)).size === nodes.length);
   const anchorOf = (spec: string) => nodes.find((n) => n.spec_id === spec)?.anchor;
-  check("Goal tasks hang off the goal", anchorOf("lead_list") === "goal", anchorOf("lead_list") ?? "none");
+  check("Goal tasks hang off the goal", anchorOf("lead_list") === "goal_detail", anchorOf("lead_list") ?? "none");
   check("Tasks waiting on the tool the trail asks about hang off that question", anchorOf("cold_outbound") === "tool", anchorOf("cold_outbound") ?? "none");
 
   await syncMap(workspace.id);
@@ -81,7 +81,7 @@ try {
     nodeState(finalNodes.find((n) => n.spec_id === "cold_outbound")!, { ploys: finalPloys, integrations, mapNodes: finalNodes, docs }).state === "available",
   );
 
-  // Without knowing who they sell to, audience tasks wait on the follow-up question.
+  // Without knowing who they sell to, audience tasks wait on the target_customer card.
   await applyEntryUpdate(
     second.id,
     {
@@ -94,7 +94,7 @@ try {
   await syncMap(second.id);
   const secondNodes = await getMapNodes(second.id);
   const list = secondNodes.find((n) => n.spec_id === "lead_list")!;
-  check("A task needing who they sell to hangs off the follow-up", list?.anchor === "followup", list?.anchor ?? "missing");
+  check("A task needing who they sell to hangs off who they want to reach", list?.anchor === "target_customer", list?.anchor ?? "missing");
   const secondState = async () =>
     nodeState(list, { ploys: [], integrations: [], mapNodes: secondNodes, docs: await getDocs(second.id) });
   check("…and is locked until they answer it", (await secondState()).lockReason === "Needs who you sell to");

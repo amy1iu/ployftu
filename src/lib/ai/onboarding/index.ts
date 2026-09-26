@@ -8,19 +8,19 @@ import { applyAnswer, type AppliedAnswer } from "@/lib/onboarding/answer";
 import {
   answeredSlots,
   canRedo,
-  followupChips,
   nextQuestion,
   openQuestion,
   questionFor,
-  type QuestionData,
+  toQuestion,
   type TrailMetadata,
+  type TrailState,
 } from "@/lib/onboarding/trail";
 import { readAndProfileSite } from "@/lib/site/run";
 import { models } from "../models";
 import type { OnboardingUIMessage } from "./messages";
 import { recordProfileNotes } from "./profile-notes";
 import { buildTrailPrompt } from "./prompt";
-import { replySchema, writeMessage } from "./reply";
+import { turnSchema, writeMessage } from "./reply";
 
 export type { OnboardingUIMessage } from "./messages";
 
@@ -44,11 +44,13 @@ const loadState = (workspaceId: string) =>
 /**
  * One step of the Getting Started trail: record the user's answer to the card
  * on screen, start the first deliverable if it's time, and put up the next
- * card. Tapped chips need no model call, so most steps are near-instant; the
- * model only writes the follow-up (specific to their business) and replies to
- * anything off-script. Returns the UI message stream plus `background`, work
- * that outlives the step (reading their site, growing the map, the first
- * deliverable), for the caller to keep alive. Shared by the chat route and the evals.
+ * card. Tapped chips are recorded without a model; the next card is planned
+ * by the chat model in one structured call (which item to ask about, its
+ * words, or finish), streaming its message first. Only the website card (always
+ * first) and the cap are code's. Returns the UI message stream plus
+ * `background`, work that outlives the step (reading their site, growing the
+ * map, the first deliverable), for the caller to keep alive. Shared by the chat
+ * route and the evals.
  */
 export async function onboardingTurn({
   workspaceId,
@@ -78,9 +80,12 @@ export async function onboardingTurn({
   if (answer?.slot) answered.add(answer.slot);
 
   // The first deliverable: the quick win they picked, or ours once we know enough.
-  const recipe = answer?.quickWin ?? quickWinToStart({ workspace, docs, ploys, answered });
+  // A quick win they picked starts unless one is already running (e.g. a stale card).
+  const running = ploys.some((p) => p.spec?.source === "quick_win");
+  const recipe = (!running && answer?.quickWin) || quickWinToStart({ workspace, docs, ploys, answered });
   const started = recipe ? await startQuickWin(workspace, recipe, { picked: !!answer?.quickWin }) : null;
-  const next = nextQuestion({ workspace, docs, ploys: started ? [...ploys, started] : ploys, mapNodes, integrations, answered });
+  const state: TrailState = { workspace, docs, ploys: started ? [...ploys, started] : ploys, mapNodes, integrations, answered };
+  const next = nextQuestion(state);
 
   const background = Promise.all([
     sideEffects && syncMap(workspaceId),
@@ -95,8 +100,9 @@ export async function onboardingTurn({
     offScript: answer?.offScript ?? null,
     problems: answer?.problems ?? [],
   };
-  // The model writes only what the code can't: a reply to what they said, or the follow-up.
-  const needsWords = (!!said && (!said.answered || !!said.offScript)) || (!!next && (!next.question || !next.chips));
+  // The model plans every card but the website; around that card and at the cap it only replies, when there's something to reply to.
+  const planning = next === "plan";
+  const needsReply = !!said && (!said.answered || !!said.offScript);
 
   const stream = createUIMessageStream<OnboardingUIMessage>({
     originalMessages: messages,
@@ -106,31 +112,22 @@ export async function onboardingTurn({
         writer.write({ type: "data-answered", data: { slot: answer.slot, summary: answer.summary } });
       if (started) writer.write({ type: "data-taskStarted", data: { ployId: started.id, title: started.title } });
 
-      const words = needsWords
-        ? await writeMessage(
-            writer,
-            streamText({
-              model: models.chat,
-              system: buildTrailPrompt({ workspace, docs, next, said }),
-              messages: [{ role: "user", content: latest ? `The user's latest message: "${latestText(latest)}"` : "Begin." }],
-              providerOptions: models.chatOptions,
-              output: Output.object({ schema: replySchema }),
-            }),
-          )
-        : null;
+      const turn =
+        planning || needsReply
+          ? await writeMessage(
+              writer,
+              streamText({
+                model: models.chat,
+                system: buildTrailPrompt({ state, docs, messages, said, planning }),
+                messages: [{ role: "user", content: latest ? `The user's latest message: "${latestText(latest)}"` : "Begin." }],
+                providerOptions: models.chatOptions,
+                output: Output.object({ schema: turnSchema }),
+              }),
+            )
+          : null;
 
-      if (next) {
-        const question: QuestionData = {
-          slot: next.slot,
-          hint: next.hint,
-          category: next.category,
-          alt: next.alt,
-          question: next.question ?? words?.question ?? "Who are your best customers?",
-          chips: next.chips ?? followupChips(words?.replies ?? []),
-          offScript: !!said?.offScript,
-        };
-        writer.write({ type: "data-question", data: question });
-      }
+      const question = planning ? toQuestion(turn?.next ?? null, state) : next;
+      if (question) writer.write({ type: "data-question", data: { ...question, offScript: !!said?.offScript } });
       writer.write({ type: "finish" });
     },
     onEnd: async ({ messages }) => {

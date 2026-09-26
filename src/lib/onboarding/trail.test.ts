@@ -1,8 +1,22 @@
+import type { UIMessage } from "ai";
 import { describe, expect, it } from "vitest";
+import { contextItems } from "@/lib/catalog/context";
 import type { Integration, Ploy, Workspace } from "@/lib/db/types";
 import { confirmedProfile, profileWith } from "@/test/fixtures";
 import { emptyEntry, type Entry } from "./entry";
-import { nextQuestion, type AnsweredSlot, type TrailState } from "./trail";
+import {
+  itemStatus,
+  MAX_ANSWERED,
+  nextQuestion,
+  openQuestion,
+  pickChips,
+  toQuestion,
+  websiteQuestion,
+  type AnsweredSlot,
+  type PlannedCard,
+  type QuestionData,
+  type TrailState,
+} from "./trail";
 
 const site: Entry["website"] = { status: "has", url: "https://acme.com" };
 const outbound: Entry["goals"] = { status: "has", intents: [{ id: "run_outbound", weight: 1 }], inUserWords: null, unmatched: null };
@@ -19,84 +33,198 @@ const state = (overrides: Partial<TrailState> & { answered?: Set<AnsweredSlot> }
   answered: new Set(),
   ...overrides,
 });
+const planned = (card: Partial<PlannedCard> & Pick<PlannedCard, "item">): PlannedCard => ({
+  question: "Who do you most want to reach?",
+  hint: null,
+  chips: [],
+  alt: null,
+  ...card,
+});
 
 describe("nextQuestion", () => {
-  it("starts with their website", () => {
-    expect(nextQuestion(state({}))?.slot).toBe("website");
+  it("always starts with their website", () => {
+    expect(nextQuestion(state({}))).toEqual(websiteQuestion());
   });
 
-  it("asks what they sell when there's no site to read", () => {
-    const q = nextQuestion(state({ workspace: workspace({ website: { status: "none", url: null } }) }));
-    expect(q).toMatchObject({ slot: "sell", hint: null });
+  it("lets the model plan everything after the website", () => {
+    expect(nextQuestion(state({ workspace: workspace({ website: { status: "none", url: null } }) }))).toBe("plan");
+    expect(nextQuestion(state({ workspace: workspace({ website: site, goals: outbound }) }))).toBe("plan");
   });
 
-  it("explains when their site couldn't be read", () => {
-    const q = nextQuestion(state({ workspace: workspace({ website: { status: "unreadable", url: "https://acme.com" } }) }));
-    expect(q?.slot).toBe("sell");
-    expect(q?.hint).toMatch(/couldn't read/);
+  it(`stops after ${MAX_ANSWERED} answers, whatever's left`, () => {
+    const answered = new Set<AnsweredSlot>(["website", "goal_detail", "target_customer", "tool", "constraints", "current_acquisition"]);
+    expect(nextQuestion(state({ workspace: workspace({ website: site }), answered }))).toBeNull();
+  });
+});
+
+describe("itemStatus", () => {
+  const withSite = workspace({ website: site, goals: outbound });
+
+  it("knows what they told us", () => {
+    expect(itemStatus("target_customer", state({ workspace: withSite, docs: confirmedProfile("audience") }))).toBe("known");
+    expect(itemStatus("goal_detail", state({ workspace: withSite }))).toBe("known");
+    expect(itemStatus("quick_win_offer", state({ workspace: withSite, ploys: [quickWin] }))).toBe("known");
   });
 
-  it("forks into a goal or a quick win once it knows the business", () => {
-    const q = nextQuestion(state({ workspace: workspace({ website: site }) }));
-    expect(q?.slot).toBe("fork");
-    expect(q?.chips?.at(-1)).toEqual({ label: "Not sure yet", value: "unsure" });
-    expect(q?.alt?.chips.map((c) => c.value)).toEqual(["homepage_audit", "outreach_sequence", "lookalike_accounts"]);
+  it("marks what their site says as inferred, not known", () => {
+    expect(itemStatus("target_customer", state({ workspace: withSite, docs: profileWith("audience") }))).toBe("inferred");
+  });
+
+  it("waits on their site for what they sell, unless it couldn't be read", () => {
+    expect(itemStatus("business_model", state({ workspace: withSite }))).toBe("reading");
+    expect(itemStatus("business_model", state({ workspace: workspace({ website: site }, { status: "failed" }) }))).toBe("missing");
+    expect(itemStatus("business_model", state({ workspace: workspace({ website: { status: "none", url: null } }) }))).toBe("missing");
+  });
+
+  it("marks 'not sure' answers as asked", () => {
+    expect(itemStatus("target_customer", state({ workspace: withSite, answered: new Set(["target_customer"]) }))).toBe("answered");
+  });
+
+  it("has no tool to ask about until tasks need one", () => {
+    expect(itemStatus("tool", state({}))).toBe("unavailable");
+    expect(itemStatus("tool", state({ workspace: withSite }))).toBe("missing");
+    const named = workspace({ website: site, goals: outbound, tools: { email: "Gmail" } });
+    expect(itemStatus("tool", state({ workspace: named }))).toBe("known");
+  });
+});
+
+describe("contextItems", () => {
+  it("treats a confirmed section as known for every profile-backed item", () => {
+    const s = { workspace: workspace({}), docs: confirmedProfile("offering"), ploys: [], integrations: [] as Integration[] };
+    expect(contextItems.business_model.known(s)).toBe(true);
+    expect(contextItems.constraints.known(s)).toBe(false);
+  });
+
+  it("tolerates profiles without the constraints section", () => {
+    const docs = profileWith().map((d) => ({ ...d, sections: {} }));
+    expect(contextItems.constraints.known({ workspace: workspace({}), docs, ploys: [], integrations: [] })).toBe(false);
+  });
+});
+
+describe("pickChips", () => {
+  const options = [
+    { label: "Get more leads", value: "get_more_leads" },
+    { label: "Run outbound outreach", value: "run_outbound" },
+    { label: "Launch paid ads", value: "launch_paid_ads" },
+  ];
+
+  it("maps numbered picks to their option, keeping the model's wording", () => {
+    expect(pickChips(options, ["3. Google Ads for more jobs", "1. Get more leads"])).toEqual([
+      { label: "Google Ads for more jobs", value: "launch_paid_ads" },
+      { label: "Get more leads", value: "get_more_leads" },
+    ]);
+  });
+
+  it("maps by label, and drops anything that isn't an option", () => {
+    expect(pickChips(options, ["run outbound outreach", "Become famous", "Launch paid ads"]).map((c) => c.value)).toEqual([
+      "run_outbound",
+      "launch_paid_ads",
+    ]);
+  });
+
+  it("falls back to every option when fewer than two survive", () => {
+    expect(pickChips(options, ["Become famous", "9. Nope"])).toEqual(options);
+  });
+});
+
+describe("toQuestion", () => {
+  const withSite = workspace({ website: site, goals: outbound });
+
+  it("finishes when the model does", () => {
+    expect(toQuestion(null, state({ workspace: withSite }))).toBeNull();
+  });
+
+  it("writes open items' chips from the model, plus 'not sure'", () => {
+    const q = toQuestion(
+      planned({ item: "target_customer", chips: ["Independent cafés", "Offices", "Not sure", "Hotels", "Gyms"] }),
+      state({ workspace: withSite }),
+    );
+    expect(q?.slot).toBe("target_customer");
+    expect(q?.chips.map((c) => c.label)).toEqual(["Independent cafés", "Offices", "Hotels", "Not sure yet"]);
+  });
+
+  it("lets them type what they sell without a 'not sure' chip", () => {
+    const noSite = workspace({ website: { status: "none", url: null } });
+    expect(toQuestion(planned({ item: "business_model", question: "What do you sell?" }), state({ workspace: noSite }))?.chips).toEqual([]);
+  });
+
+  it("keeps goal chip values from the catalog, and 'not sure'", () => {
+    const s = state({ workspace: workspace({ website: site }) });
+    const unmatched = toQuestion(planned({ item: "goal_detail", chips: ["2. More demo bookings", "made up"] }), s);
+    expect(unmatched?.chips.map((c) => c.value)).toEqual(["convert_site_visitors", "get_more_leads", "run_outbound", "launch_paid_ads", "unsure"]);
+    const picked = toQuestion(planned({ item: "goal_detail", chips: ["2. More demo bookings", "1. Convert more site visitors"] }), s);
+    expect(picked?.chips).toEqual([
+      { label: "More demo bookings", value: "get_more_leads" },
+      { label: "Convert more site visitors", value: "convert_site_visitors" },
+      { label: "Not sure yet", value: "unsure" },
+    ]);
+  });
+
+  it("offers the quick win beside another card, with catalog quick wins", () => {
+    const alt = { question: "Want something **useful** now?", hint: null, chips: ["1. Audit my homepage", "3. Find accounts"] };
+    const q = toQuestion(planned({ item: "goal_detail", alt }), state({ workspace: workspace({ website: site }) }));
+    expect(q?.alt).toMatchObject({ slot: "quick_win_offer", question: "Want something useful now?" });
+    expect(q?.alt?.chips.map((c) => c.value)).toEqual(["homepage_audit", "lookalike_accounts"]);
   });
 
   it("offers a landing page instead of a homepage audit without a site", () => {
-    const q = nextQuestion(state({ workspace: workspace({ website: { status: "none", url: null } }), docs: profileWith("offering") }));
+    const alt = { question: "Quick win?", hint: null, chips: [] };
+    const q = toQuestion(planned({ item: "goal_detail", alt }), state({ workspace: workspace({ website: { status: "none", url: null } }) }));
     expect(q?.alt?.chips[0].value).toBe("landing_page_draft");
     expect(q?.alt?.chips.map((c) => c.value)).not.toContain("homepage_audit");
   });
 
-  it("suggests the goals their site points at first", () => {
-    const q = nextQuestion(
-      state({ workspace: workspace({ website: site }, { opportunities: [{ intent: "launch_paid_ads", title: "", why: "" }] }) }),
-    );
-    expect(q?.chips?.[0].value).toBe("launch_paid_ads");
+  it("never offers a second quick win", () => {
+    const s = state({ workspace: withSite, ploys: [quickWin] });
+    const alt = { question: "Quick win?", hint: null, chips: [] };
+    expect(toQuestion(planned({ item: "target_customer", alt }), s)?.alt).toBeNull();
+    expect(toQuestion(planned({ item: "quick_win_offer" }), s)).toBeNull();
   });
 
-  it("still asks the goal after they pick a quick win", () => {
-    const q = nextQuestion(state({ workspace: workspace({ website: site }), ploys: [quickWin], answered: new Set(["quick_win"]) }));
-    expect(q?.slot).toBe("goal");
-    expect(q?.question).toMatch(/^While that builds/);
-  });
-
-  it("asks who they sell to, in the model's words, when it isn't known", () => {
-    const q = nextQuestion(state({ workspace: workspace({ website: site, goals: outbound }) }));
-    expect(q).toMatchObject({ slot: "followup", question: null, chips: null });
-    expect(q?.guide).toContain("Who do you most want to reach out to?");
-  });
-
-  it("still asks who they want to reach when only their site says who buys", () => {
-    const q = nextQuestion(state({ workspace: workspace({ website: site, goals: outbound }), docs: profileWith("offering", "audience") }));
-    expect(q?.slot).toBe("followup");
-  });
-
-  it("skips the follow-up when they've already said who they want to reach", () => {
-    const q = nextQuestion(state({ workspace: workspace({ website: site, goals: outbound }), docs: confirmedProfile("offering", "audience") }));
-    expect(q?.slot).toBe("tool");
-  });
-
-  it("asks for the tool the most tasks need", () => {
-    const q = nextQuestion(state({ workspace: workspace({ website: site, goals: outbound }), docs: confirmedProfile("offering", "audience") }));
+  it("asks for the tool the most tasks need, with its chips and skip", () => {
+    const q = toQuestion(planned({ item: "tool", question: "Which email do you use?", chips: ["1. Gmail"] }), state({ workspace: withSite }));
     expect(q).toMatchObject({ slot: "tool", category: "email" });
-    expect(q?.chips?.map((c) => c.value)).toEqual(["email:Gmail", "email:Outlook", "skip"]);
+    expect(q?.chips.map((c) => c.value)).toEqual(["email:Gmail", "email:Outlook", "skip"]);
   });
 
-  it("never re-asks an answered slot", () => {
-    const q = nextQuestion(state({ workspace: workspace({ website: site, goals: outbound }), answered: new Set(["followup"]) }));
-    expect(q?.slot).toBe("tool");
+  it("finishes rather than ask something code can't serve", () => {
+    expect(toQuestion(planned({ item: "tool" }), state({}))).toBeNull();
+    expect(toQuestion(planned({ item: "website" }), state({ workspace: withSite }))).toBeNull();
+  });
+});
+
+describe("openQuestion", () => {
+  const ask = (id: string, q: Partial<QuestionData>): UIMessage => ({
+    id,
+    role: "assistant",
+    parts: [{ type: "data-question", data: { ...websiteQuestion(), ...q } }],
+  });
+  const answer = (id: string, slot: AnsweredSlot, question?: Partial<QuestionData>): UIMessage[] => [
+    { id: `u${id}`, role: "user", parts: [{ type: "text", text: "x" }] },
+    {
+      id,
+      role: "assistant",
+      parts: [
+        { type: "data-answered", data: { slot, summary: "x" } },
+        ...(question ? [{ type: "data-question" as const, data: { ...websiteQuestion(), ...question } }] : []),
+      ],
+    },
+  ];
+
+  it("is the latest card until it's answered", () => {
+    const messages = [ask("a", { slot: "target_customer" })];
+    expect(openQuestion(messages)?.slot).toBe("target_customer");
+    expect(openQuestion([...messages, ...answer("b", "target_customer")])).toBeNull();
   });
 
-  it("is done once there's nothing left to ask", () => {
-    const gmail = [{ category: "email", provider: "Gmail" } as Integration];
-    const done = state({
-      workspace: workspace({ website: site, goals: outbound }),
-      docs: confirmedProfile("offering", "audience"),
-      integrations: gmail,
-      answered: new Set(["tool"]),
-    });
-    expect(nextQuestion(done)).toBeNull();
+  it("stays open when the model asks about an item again", () => {
+    const messages = [ask("a", { slot: "target_customer" }), ...answer("b", "target_customer", { slot: "target_customer" })];
+    expect(openQuestion(messages)?.slot).toBe("target_customer");
+  });
+
+  it("closes the fork when either card is answered", () => {
+    const alt = { slot: "quick_win_offer" as const, question: "?", hint: null, chips: [] };
+    const messages = [ask("a", { slot: "goal_detail", alt }), ...answer("b", "quick_win_offer")];
+    expect(openQuestion(messages)).toBeNull();
   });
 });

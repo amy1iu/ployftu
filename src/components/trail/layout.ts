@@ -3,6 +3,7 @@
 import type { OnboardingUIMessage, TaskStartedData } from "@/lib/ai/onboarding/messages";
 import { getSpec } from "@/lib/catalog";
 import type { MapNode, Ploy } from "@/lib/db/types";
+import { legacyAnchors } from "@/lib/map/plan";
 import { nodeState, type NodeState } from "@/lib/map/state";
 import {
   openQuestion,
@@ -44,11 +45,10 @@ const textOf = (message: OnboardingUIMessage) =>
 const partOf = <T,>(message: OnboardingUIMessage | undefined, type: string) =>
   (message?.parts.find((p) => p.type === type) as { data: T } | undefined)?.data;
 
-/** Where a question's tasks sit: the fork's are the goal's. */
-const questionKey = (q: QuestionData) => (q.slot === "fork" ? "goal" : q.slot);
+/** Where a question's tasks sit: the fork's are its main card's. */
+const questionKey = (q: QuestionData) => q.slot;
 /** The card an answer was given on: the fork has two. */
-const cardFor = (q: QuestionData | null, slot: AnsweredSlot): Card | null =>
-  q?.slot === "fork" && slot === "quick_win" ? q.alt : q;
+const cardFor = (q: QuestionData | null, slot: AnsweredSlot): Card | null => (q?.alt?.slot === slot ? q.alt : q);
 const metaOf = (m: OnboardingUIMessage | undefined) => (m?.metadata ?? {}) as TrailMetadata;
 
 /** The trail's rows, in order, from the Getting Started messages. */
@@ -72,7 +72,7 @@ export function buildRows(
       if (reply && textOf(reply)) return; // shown in the reply node
       // Waiting on the reply: show the answer as pending.
       const meta = metaOf(message);
-      const slot = meta.slot ?? (asked && (asked.slot === "fork" ? "goal" : asked.slot));
+      const slot = meta.slot ?? asked?.slot;
       const existing = meta.redo && slot ? answeredAt.get(slot) : undefined;
       if (existing !== undefined) rows[existing] = { ...(rows[existing] as Extract<Row, { kind: "answered" }>), summary: textOf(message), pending: true };
       else if (asked && slot)
@@ -145,7 +145,7 @@ export function useTrailLayout(messages: OnboardingUIMessage[], busy: boolean) {
   const byRow = new Map<string, MapNode[]>();
   for (const node of mapNodes) {
     if (getSpec(node.spec_id)?.source === "quick_win") continue; // shown as the build node
-    const anchor = node.anchor ?? (node.region === "site_brand" ? "site" : "goal");
+    const anchor = node.anchor ? (legacyAnchors[node.anchor] ?? node.anchor) : node.region === "site_brand" ? "site" : "goal_detail";
     const key = keys.has(anchor) ? anchor : done ? "end" : null;
     if (key) byRow.set(key, [...(byRow.get(key) ?? []), node]);
   }

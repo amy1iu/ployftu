@@ -6,7 +6,6 @@ import { confirmProfile, fixProfile } from "@/app/actions";
 import type { OnboardingUIMessage } from "@/lib/ai/onboarding/messages";
 import type { IntegrationCategory } from "@/lib/catalog/integrations";
 import { readSection } from "@/lib/docs/markdown";
-import type { AnsweredSlot } from "@/lib/onboarding/trail";
 import { ThinkingIndicator } from "../chat/thinking-indicator";
 import { ConnectModal } from "../map/connect-modal";
 import { ACTIVE_QUESTION_ID, useTaskPanel } from "../tasks/task-panel";
@@ -129,7 +128,7 @@ export function Trail({
         onConnect={(category, tool) => setConnecting({ category, tool })}
       />
     ));
-    if (key === "goal" && active?.key === "goal" && !cards.length) cards.push(<FogCard key="fog-1" />, <FogCard key="fog-2" />);
+    if (key === "goal_detail" && active?.key === "goal_detail" && !cards.length) cards.push(<FogCard key="fog-1" />, <FogCard key="fog-2" />);
     return { left: cards.filter((_, i) => i % 2 === 1), right: cards.filter((_, i) => i % 2 === 0) };
   };
 
@@ -233,7 +232,7 @@ export function Trail({
                   </TrailRow>
                 );
               case "question":
-                if (row.question.slot === "fork")
+                if (row.question.alt)
                   return (
                     <div key="fork" id={ACTIVE_QUESTION_ID} className="relative flex justify-center pb-2">
                       <span className="absolute top-0 left-1/2 h-3 border-l border-dashed border-ink/20" aria-hidden />
@@ -245,7 +244,7 @@ export function Trail({
                     <div id={ACTIVE_QUESTION_ID}>
                       <QuestionCard
                         card={row.question}
-                        slot={row.question.slot as AnsweredSlot}
+                        slot={row.question.slot}
                         lead={row.lead}
                         disabled={busy}
                         onAnswer={onAnswer}
