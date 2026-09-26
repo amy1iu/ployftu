@@ -1,4 +1,5 @@
 import { createUIMessageStream, Output, streamText } from "ai";
+import { logEvent } from "@/lib/db/events";
 import type { Workspace } from "@/lib/db/types";
 import { getDocs, getIntegrations, getMapNodes, getPloys, getWorkspace } from "@/lib/db/workspaces";
 import { syncMap } from "@/lib/map/sync";
@@ -127,6 +128,11 @@ export async function onboardingTurn({
           : null;
 
       const question = planning ? toQuestion(turn?.next ?? null, state) : next;
+      // A card code couldn't serve (e.g. a second quick win) finishes the trail instead; count how often.
+      if (planning && turn?.next && !question) {
+        console.warn(`Planner card dropped: ${turn.next.item}`);
+        await logEvent(workspaceId, "planner_card_dropped", { item: turn.next.item });
+      }
       if (question) writer.write({ type: "data-question", data: { ...question, offScript: !!said?.offScript } });
       writer.write({ type: "finish" });
     },
