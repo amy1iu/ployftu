@@ -1,6 +1,6 @@
 import type { UIMessage } from "ai";
 import { catalogForPrompt, getIntent, quickWins } from "@/lib/catalog";
-import { contextItemIds, contextItems, type ContextItemId, type ContextKey } from "@/lib/catalog/context";
+import { contextItemIds, contextItems, type ContextItemId } from "@/lib/catalog/context";
 import { integrationCategories } from "@/lib/catalog/integrations";
 import type { Doc } from "@/lib/db/types";
 import { readSection } from "@/lib/docs/markdown";
@@ -9,6 +9,8 @@ import { toolToAsk } from "@/lib/map/plan";
 import { defaultQuickWin, topIntent, type Entry } from "@/lib/onboarding/entry";
 import {
   chipOptions,
+  quickWinChips,
+  quickWinNeeds,
   itemStatus,
   MAX_ANSWERED,
   toolQuestions,
@@ -81,6 +83,7 @@ const dontAsk: Partial<Record<ItemStatus, string>> = {
   answered: "asked already; they weren't sure or skipped",
   reading: "coming from their site, which is being read",
   unavailable: "none of their tasks need a tool yet",
+  waiting: "no quick win would be specific to them yet; it's offered once they've said what it needs (see Their first deliverable)",
 };
 
 /**
@@ -110,7 +113,7 @@ function describeItems(state: TrailState, docs: Doc[], done: boolean) {
 ${list(["known"], (id) => `- ${id}: ${recorded(id, state, docs)}`)}
 
 ## Don't ask
-${list(["answered", "reading", "unavailable"], (id, status) => `- ${id}: ${dontAsk[status]}`)}
+${list(["answered", "reading", "unavailable", "waiting"], (id, status) => `- ${id}: ${dontAsk[status]}`)}
 
 ## Inferred from their site: don't ask cold; confirm only if it matters for their goal
 ${list(["inferred"], (id) => `${open(id)}\n  Their site says: ${recorded(id, state, docs)}`)}
@@ -132,15 +135,25 @@ function readiness(state: TrailState) {
     : { done: true, text: "READY TO FINISH: their goal and who they want to reach are in, and their first deliverable is running. Set next to null now." };
 }
 
-/** Their first deliverable: running, picked, or what starts on its own once we know enough. */
+/**
+ * Their first deliverable: running, or what starts on its own and what it's
+ * waiting on. A deliverable is only as specific as what we know, so none
+ * starts (or is offered) before it has what its recipe needs.
+ */
 function describeQuickWin(state: TrailState) {
   const running = state.ploys.find((p) => p.spec?.source === "quick_win");
   if (running) return `Running: ${running.spec?.name}. Don't offer another.`;
+  const ready = quickWinChips(state);
+  const offer = ready.length
+    ? `Ready to offer now: ${ready.map((c) => c.label).join("; ")}.`
+    : "None is ready to offer yet: each would be generic without more about them.";
   const recipe = defaultQuickWin(state.workspace.entry);
-  const waiting = recipe && (quickWins[recipe].spec.needsContext as ContextKey[]).includes("audience");
-  if (recipe)
-    return `Not started. "${quickWins[recipe].spec.name}" starts on its own${waiting ? " once target_customer is known or answered" : " right away"}.`;
-  return "Not started. On the goal path it starts on its own once the goal is known (and, for audience-based ones, who they want to reach). Offering the quick win card lets them start one now.";
+  if (!recipe) return `Not started. ${offer} On the goal path one starts on its own once the goal is known.`;
+  const needs = quickWinNeeds(recipe, state);
+  const name = `"${quickWins[recipe].spec.name}"`;
+  if (!needs.length) return `Not started. ${offer} ${name} starts on its own now.`;
+  const fallback = needs.includes("target_customer") ? " (if they're not sure who, a ready one that doesn't need it starts instead)" : "";
+  return `Not started. ${offer} ${name} starts on its own once ${needs.join(" and ")} ${needs.length > 1 ? "are" : "is"} known${fallback}.`;
 }
 
 function describeSite(state: TrailState) {
@@ -217,11 +230,12 @@ The user is on Getting Started: a short trail of question cards, each answerable
 # How to plan
 1. Ask only about items listed under Open (or confirm an Inferred one). Never ask about anything under Done or Don't ask, even reworded, and even if the answer is vague or broad: don't refine it. If they already said it in the trail so far, even in passing, it's done.
 2. No readable site (none, not live, or couldn't be read): ask business_model first; everything Ploy makes needs it.
-3. Then goal_detail, with the quick win offered beside it as alt (the fork). If they pick the quick win, ask goal_detail next.
+3. Then goal_detail, with the quick win offered beside it as alt (the fork) when quick_win_offer is Open. If they pick the quick win, ask goal_detail next.
 4. Then target_customer, asked for their goal. Their first deliverable starts on its own once goal_detail and target_customer are in.
 5. current_acquisition, constraints, and tool only when they'd change what Ploy does first for them, and the trail isn't ready to finish.
-6. Finish (next: null) as soon as it's READY TO FINISH, even with items left: they're optional. Also finish when they seem done, impatient, or want to get going. Short beats thorough: every card costs them time.
-7. One question per card, about one item.
+6. A first deliverable is only as good as what we know about them: one built on nothing is generic and wastes their first impression. So quick wins are only offered once one has what it needs (quick_win_offer is under Open only then), and the first one starts on its own once it does. When the trail is waiting on something for their deliverable (see Their first deliverable), ask for that next.
+7. Finish (next: null) as soon as it's READY TO FINISH, even with items left: they're optional. Also finish when they seem done, impatient, or want to get going. Short beats thorough: every card costs them time.
+8. One question per card, about one item.
 
 # Rules
 - Warm, plain, and brief. No filler, no exclamation marks.

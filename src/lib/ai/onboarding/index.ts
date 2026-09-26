@@ -12,6 +12,7 @@ import {
   nextQuestion,
   openQuestion,
   questionFor,
+  quickWinReady,
   toQuestion,
   type TrailMetadata,
   type TrailState,
@@ -81,10 +82,12 @@ export async function onboardingTurn({
   if (answer?.slot) answered.add(answer.slot);
 
   // The first deliverable: the quick win they picked, or ours once we know enough.
-  // A quick win they picked starts unless one is already running (e.g. a stale card).
+  // A quick win they picked starts unless one is already running, or (from a
+  // stale card) it isn't ready: only ready ones are offered.
   const running = ploys.some((p) => p.spec?.source === "quick_win");
-  const recipe = (!running && answer?.quickWin) || quickWinToStart({ workspace, docs, ploys, answered });
-  const started = recipe ? await startQuickWin(workspace, recipe, { picked: !!answer?.quickWin }) : null;
+  const picked = !running && answer?.quickWin && quickWinReady(answer.quickWin, { workspace, docs }) ? answer.quickWin : null;
+  const recipe = picked || quickWinToStart({ workspace, docs, ploys, answered });
+  const started = recipe ? await startQuickWin(workspace, recipe, { picked: !!picked }) : null;
   const state: TrailState = { workspace, docs, ploys: started ? [...ploys, started] : ploys, mapNodes, integrations, answered };
   const next = nextQuestion(state);
 

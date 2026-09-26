@@ -1,10 +1,11 @@
 import type { UIMessage } from "ai";
-import { contextItems, type ContextItemId } from "@/lib/catalog/context";
+import { contextItems, contextKeys, type ContextItemId } from "@/lib/catalog/context";
 import { getIntent, type IntentId } from "@/lib/catalog/intents";
 import { integrationCategories, type IntegrationCategory } from "@/lib/catalog/integrations";
 import { quickWins, type QuickWinId } from "@/lib/catalog/quick-wins";
 import type { Doc, Integration, MapNode, Ploy, Workspace } from "@/lib/db/types";
 import { cleanQuestion } from "@/lib/ai/onboarding/sentences";
+import { hasContext } from "@/lib/docs/profile";
 import { toolToAsk } from "@/lib/map/plan";
 
 // Getting Started is a trail of small questions, each answerable in under a
@@ -90,13 +91,37 @@ export function goalChips(workspace: Pick<Workspace, "entry" | "crawl">): Chip[]
 
 const quickWinOrder: QuickWinId[] = ["homepage_audit", "outreach_sequence", "lookalike_accounts", "social_posts", "landing_page_draft"];
 
-/** Three quick wins that fit: a homepage audit when they have a site, a landing page when they don't. */
-export function quickWinChips(workspace: Pick<Workspace, "entry" | "crawl">): Chip[] {
+/**
+ * What a quick win still needs before it can be specific to them: their site
+ * for the audit, and each piece of context its recipe names. Who they want to
+ * reach has to come from them (their site only says who buys today). Empty
+ * when it's ready; anything less and the deliverable would be generic.
+ */
+export function quickWinNeeds(id: QuickWinId, { workspace, docs }: Pick<TrailState, "workspace" | "docs">): ContextItemId[] {
+  const { needsWebsite, spec } = quickWins[id];
+  const noSite = workspace.entry.website.status !== "has" || workspace.crawl?.status === "failed";
+  return [
+    ...(needsWebsite && noSite ? (["website"] as const) : []),
+    ...spec.needsContext
+      .filter((key) => !hasContext(docs, key, { confirmed: key === "audience" }))
+      .map((key) => contextKeys[key].item),
+  ];
+}
+
+export const quickWinReady = (id: QuickWinId, state: Pick<TrailState, "workspace" | "docs">) => !quickWinNeeds(id, state).length;
+
+/**
+ * Up to three quick wins that are ready now: a homepage audit when they have a
+ * site, a landing page when they don't. None until we know enough to make one
+ * specific to them (e.g. what they sell, with no site).
+ */
+export function quickWinChips(state: Pick<TrailState, "workspace" | "docs">): Chip[] {
+  const { workspace } = state;
   const hasSite = workspace.entry.website.status === "has";
   const suggested = (workspace.crawl?.opportunities ?? []).map((o) => getIntent(o.intent).quickWin);
   const first: QuickWinId[] = hasSite ? ["homepage_audit"] : ["landing_page_draft"];
   return [...new Set([...first, ...suggested, ...quickWinOrder])]
-    .filter((id) => hasSite || !quickWins[id].needsWebsite)
+    .filter((id) => quickWinReady(id, state))
     .slice(0, 3)
     .map((id) => ({ label: quickWins[id].label, value: id }));
 }
@@ -141,7 +166,8 @@ export function nextQuestion(state: TrailState): QuestionData | "plan" | null {
 }
 
 /** Where an item stands, for the planner. */
-export type ItemStatus = "known" | "answered" | "inferred" | "reading" | "missing" | "unavailable";
+/** `waiting`: the quick win, before any would be specific to them. */
+export type ItemStatus = "known" | "answered" | "inferred" | "reading" | "missing" | "unavailable" | "waiting";
 
 export function itemStatus(id: ContextItemId, state: TrailState): ItemStatus {
   const item = contextItems[id];
@@ -149,6 +175,7 @@ export function itemStatus(id: ContextItemId, state: TrailState): ItemStatus {
   // Said "not sure" or skipped: asked already.
   if (state.answered.has(id)) return "answered";
   if (id === "tool" && !toolToAsk(state)) return "unavailable";
+  if (id === "quick_win_offer" && !quickWinChips(state).length) return "waiting";
   if (item.inferred(state)) return "inferred";
   // Their site is being read and will say what they sell.
   const { website } = state.workspace.entry;
@@ -160,7 +187,7 @@ export function itemStatus(id: ContextItemId, state: TrailState): ItemStatus {
 /** The chips an item's card must use, when their values drive code; null when the model writes them. */
 export function chipOptions(id: ContextItemId, state: TrailState): Chip[] | null {
   if (id === "goal_detail") return goalChips(state.workspace);
-  if (id === "quick_win_offer") return quickWinChips(state.workspace);
+  if (id === "quick_win_offer") return quickWinChips(state);
   if (id === "tool") {
     const category = toolToAsk(state);
     return category ? toolChips(category) : [];
@@ -225,13 +252,16 @@ export function toQuestion(planned: PlannedCard | null, state: TrailState): Ques
   if (item === "goal_detail" && !chips.some((c) => c.value === notSure.value)) chips = [...chips, notSure];
   if (item === "tool" && !chips.some((c) => c.value === skip.value)) chips = [...chips, skip];
 
+  // Only quick wins that are ready are offered, beside the card or on their own.
+  const ready = quickWinChips(state);
+  if (item === "quick_win_offer" && !ready.length) return null;
   const alt =
-    planned.alt && item !== "quick_win_offer" && !quickWinRunning
+    planned.alt && item !== "quick_win_offer" && !quickWinRunning && ready.length
       ? {
           slot: "quick_win_offer" as const,
           question: cleanQuestion(planned.alt.question) || "Want something useful in the next few minutes?",
           hint: planned.alt.hint ?? "Pick one and I'll start right away.",
-          chips: pickChips(quickWinChips(state.workspace), planned.alt.chips),
+          chips: pickChips(ready, planned.alt.chips),
         }
       : null;
   return {

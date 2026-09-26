@@ -2,16 +2,16 @@ import { getIntent } from "@/lib/catalog/intents";
 import { quickWins, type QuickWinId } from "@/lib/catalog/quick-wins";
 import { logEvent } from "@/lib/db/events";
 import type { Doc, Ploy, Workspace } from "@/lib/db/types";
-import { hasContext } from "@/lib/docs/profile";
 import { defaultQuickWin, entryBranch, topIntent, type Entry } from "@/lib/onboarding/entry";
-import type { AnsweredSlot } from "@/lib/onboarding/trail";
+import { quickWinChips, quickWinReady, type AnsweredSlot } from "@/lib/onboarding/trail";
 import { createTaskPloy } from "@/lib/tasks/ploy";
 
 /**
- * On the goal path, the first deliverable starts once the goal is set and we
- * know what it needs (e.g. who they sell to), or they've answered who they
- * want to reach either way (even "not sure"). (On the quick-win path they pick
- * it themselves.) Returns the recipe to start this turn, or null.
+ * On the goal path, the first deliverable starts once the goal is set and it
+ * has what it needs to be specific to them (e.g. who they sell to). If they
+ * were asked who they want to reach and weren't sure, one that doesn't need it
+ * starts instead. Never one built on nothing. (On the quick-win path they pick
+ * one of the ready ones themselves.) Returns the recipe to start this turn, or null.
  */
 export function quickWinToStart({
   workspace,
@@ -27,11 +27,11 @@ export function quickWinToStart({
   if (ploys.some((p) => p.spec?.source === "quick_win")) return null;
   const recipe = defaultQuickWin(workspace.entry);
   if (!recipe) return null;
-  // Who it's for has to come from them: their site only says who buys today.
-  const waiting = quickWins[recipe].spec.needsContext.some(
-    (key) => !hasContext(docs, key, { confirmed: key === "audience" }),
-  );
-  return !waiting || answered.has("target_customer") ? recipe : null;
+  const state = { workspace, docs };
+  if (quickWinReady(recipe, state)) return recipe;
+  // Still waiting on who they want to reach: wait until they've been asked.
+  if (!answered.has("target_customer")) return null;
+  return (quickWinChips(state)[0]?.value as QuickWinId | undefined) ?? null;
 }
 
 function whyThisFirst(entry: Entry, recipeId: QuickWinId, picked: boolean) {

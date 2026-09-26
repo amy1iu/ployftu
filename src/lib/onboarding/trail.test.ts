@@ -10,6 +10,8 @@ import {
   nextQuestion,
   openQuestion,
   pickChips,
+  quickWinChips,
+  quickWinNeeds,
   toQuestion,
   websiteQuestion,
   type AnsweredSlot,
@@ -164,16 +166,28 @@ describe("toQuestion", () => {
 
   it("offers the quick win beside another card, with catalog quick wins", () => {
     const alt = { question: "Want something **useful** now?", hint: null, chips: ["1. Audit my homepage", "3. Find accounts"] };
-    const q = toQuestion(planned({ item: "goal_detail", alt }), state({ workspace: workspace({ website: site }) }));
+    const q = toQuestion(planned({ item: "goal_detail", alt }), state({ workspace: workspace({ website: site }), docs: confirmedProfile("audience") }));
     expect(q?.alt).toMatchObject({ slot: "quick_win_offer", question: "Want something useful now?" });
     expect(q?.alt?.chips.map((c) => c.value)).toEqual(["homepage_audit", "lookalike_accounts"]);
   });
 
   it("offers a landing page instead of a homepage audit without a site", () => {
     const alt = { question: "Quick win?", hint: null, chips: [] };
-    const q = toQuestion(planned({ item: "goal_detail", alt }), state({ workspace: workspace({ website: { status: "none", url: null } }) }));
+    const q = toQuestion(
+      planned({ item: "goal_detail", alt }),
+      state({ workspace: workspace({ website: { status: "none", url: null } }), docs: profileWith("offering") }),
+    );
     expect(q?.alt?.chips[0].value).toBe("landing_page_draft");
     expect(q?.alt?.chips.map((c) => c.value)).not.toContain("homepage_audit");
+  });
+
+  it("offers no quick win before one would be specific to them", () => {
+    const noSite = state({ workspace: workspace({ website: { status: "none", url: null } }) });
+    const alt = { question: "Quick win?", hint: null, chips: ["1. Draft a landing page"] };
+    const q = toQuestion(planned({ item: "business_model", question: "What do you sell?", alt }), noSite);
+    expect(q?.slot).toBe("business_model");
+    expect(q?.alt).toBeNull();
+    expect(toQuestion(planned({ item: "quick_win_offer" }), noSite)).toBeNull();
   });
 
   it("never offers a second quick win", () => {
@@ -228,5 +242,33 @@ describe("openQuestion", () => {
     const alt = { slot: "quick_win_offer" as const, question: "?", hint: null, chips: [] };
     const messages = [ask("a", { slot: "goal_detail", alt }), ...answer("b", "quick_win_offer")];
     expect(openQuestion(messages)).toBeNull();
+  });
+});
+
+describe("quick win readiness", () => {
+  const noSite = workspace({ website: { status: "none", url: null } });
+  const values = (s: TrailState) => quickWinChips(s).map((c) => c.value);
+
+  it("offers nothing with no site and nothing known about them", () => {
+    expect(values(state({ workspace: noSite }))).toEqual([]);
+    expect(itemStatus("quick_win_offer", state({ workspace: noSite }))).toBe("waiting");
+    expect(quickWinNeeds("landing_page_draft", state({ workspace: noSite }))).toEqual(["business_model"]);
+  });
+
+  it("offers what's ready once they've said what they sell", () => {
+    const s = state({ workspace: noSite, docs: profileWith("offering") });
+    expect(values(s)).toEqual(["landing_page_draft", "social_posts"]);
+    expect(itemStatus("quick_win_offer", s)).toBe("missing");
+  });
+
+  it("needs who they want to reach from them, not their site, for audience-based ones", () => {
+    const withSite = workspace({ website: site });
+    expect(values(state({ workspace: withSite, docs: profileWith("audience") }))).toEqual(["homepage_audit"]);
+    expect(values(state({ workspace: withSite, docs: confirmedProfile("audience") }))).toEqual(["homepage_audit", "outreach_sequence", "lookalike_accounts"]);
+    expect(quickWinNeeds("outreach_sequence", state({ workspace: withSite }))).toEqual(["target_customer"]);
+  });
+
+  it("needs a site it could read for the homepage audit", () => {
+    expect(quickWinNeeds("homepage_audit", state({ workspace: workspace({ website: site }, { status: "failed" }) }))).toEqual(["website"]);
   });
 });
