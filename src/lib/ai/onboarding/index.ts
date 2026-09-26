@@ -118,10 +118,10 @@ export async function onboardingTurn({
           ? await writeMessage(
               writer,
               streamText({
-                model: models.chat,
+                model: models.planner,
                 system: buildTrailPrompt({ state, docs, messages, said, planning }),
                 messages: [{ role: "user", content: latest ? `The user's latest message: "${latestText(latest)}"` : "Begin." }],
-                providerOptions: models.chatOptions,
+                providerOptions: models.plannerOptions,
                 output: Output.object({ schema: turnSchema }),
               }),
             )

@@ -6,13 +6,12 @@ import { confirmProfile, fixProfile } from "@/app/actions";
 import type { OnboardingUIMessage } from "@/lib/ai/onboarding/messages";
 import type { IntegrationCategory } from "@/lib/catalog/integrations";
 import { readSection } from "@/lib/docs/markdown";
-import { ThinkingIndicator } from "../chat/thinking-indicator";
 import { ConnectModal } from "../map/connect-modal";
 import { ACTIVE_QUESTION_ID, useTaskPanel } from "../tasks/task-panel";
 import { useWorkspace } from "../workspace/workspace-provider";
 import { EndNode } from "./end-node";
 import { useTrailLayout } from "./layout";
-import { AnsweredNode, BuildNode, ForkCards, QuestionCard, ReplyNode, SiteReadNode, type Answer } from "./nodes";
+import { AnsweredNode, BuildNode, ForkCards, NextCardPlaceholder, QuestionCard, ReplyNode, SiteReadNode, type Answer } from "./nodes";
 import { TaskCard } from "./task-card";
 
 // Getting Started as one experience: a map that reads top-down like a chat.
@@ -163,7 +162,7 @@ export function Trail({
             </p>
           </div>
 
-          {rows.map((row, i) => {
+          {rows.map((row) => {
             const { left, right } = cardsFor(row.key);
             switch (row.kind) {
               case "home":
@@ -227,8 +226,8 @@ export function Trail({
                 );
               case "thinking":
                 return (
-                  <TrailRow key={`thinking-${i}`} left={[]} right={[]}>
-                    <ThinkingIndicator />
+                  <TrailRow key="thinking" left={[]} right={[]}>
+                    <NextCardPlaceholder />
                   </TrailRow>
                 );
               case "question":

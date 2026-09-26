@@ -119,7 +119,9 @@ export function buildRows(
     if (isOpen) rows.push({ kind: "question", key: questionKey(question), question, lead });
   });
 
-  if (busy && !open && !redoing && last?.role === "assistant") rows.push({ kind: "thinking", key: null });
+  // From the moment they answer until the next card (or the wrap-up) arrives:
+  // whenever a turn is in flight and no card is on screen.
+  if (busy && !redoing && !rows.some((r) => r.kind === "question")) rows.push({ kind: "thinking", key: null });
   if ((!busy || redoing) && !open) rows.push({ kind: "end", key: "end" });
   return rows;
 }

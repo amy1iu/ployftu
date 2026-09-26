@@ -140,6 +140,11 @@ describe("toQuestion", () => {
     expect(q?.chips.map((c) => c.label)).toEqual(["Independent cafés", "Offices", "Hotels", "Not sure yet"]);
   });
 
+  it("strips option numbering the model carries over to its own chips", () => {
+    const q = toQuestion(planned({ item: "target_customer", chips: ["1. Online courses", "2) Handmade crafts"] }), state({ workspace: withSite }));
+    expect(q?.chips.map((c) => c.label)).toEqual(["Online courses", "Handmade crafts", "Not sure yet"]);
+  });
+
   it("lets them type what they sell without a 'not sure' chip", () => {
     const noSite = workspace({ website: { status: "none", url: null } });
     expect(toQuestion(planned({ item: "business_model", question: "What do you sell?" }), state({ workspace: noSite }))?.chips).toEqual([]);

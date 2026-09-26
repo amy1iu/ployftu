@@ -199,7 +199,8 @@ export function pickChips(options: Chip[], wanted: string[]): Chip[] {
 
 /** The model's own chips for an open question: up to three, plus "not sure" (except for what they sell). */
 function openChips(id: ContextItemId, labels: string[]): Chip[] {
-  const own = [...new Set(labels.map((l) => l.trim()).filter((l) => l && !soundsUnsure(l) && !/^skip\b/i.test(l)))]
+  // Models carry the "<n>. " numbering of option chips over to their own; strip it.
+  const own = [...new Set(labels.map((l) => l.replace(/^\s*\d+[.)]\s*/, "").trim()).filter((l) => l && !soundsUnsure(l) && !/^skip\b/i.test(l)))]
     .slice(0, 3)
     .map((label) => ({ label, value: label }));
   return id === "business_model" ? own : [...own, notSure];

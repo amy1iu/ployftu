@@ -403,3 +403,28 @@ export function ReplyNode({ said, text }: { said: string | null; text: string })
     </div>
   );
 }
+
+/**
+ * Where the next card will land, while Ploy picks it (a model call, ~1-2s).
+ * A faint outline of a card, not a spinner: the trail keeps its shape, and the
+ * card pops in over it.
+ */
+export function NextCardPlaceholder() {
+  return (
+    <div
+      role="status"
+      aria-label="Choosing your next question"
+      className="w-[300px] animate-[toast-in_300ms_ease-out] rounded-2xl border border-dashed border-ink/20 bg-white/60 p-3.5"
+    >
+      <div className="space-y-2 motion-safe:animate-pulse">
+        <div className="h-2.5 w-3/4 rounded-full bg-ink/10" />
+        <div className="h-2.5 w-1/2 rounded-full bg-ink/10" />
+        <div className="flex gap-1.5 pt-1">
+          {["w-16", "w-20", "w-14"].map((w) => (
+            <div key={w} className={`h-5 ${w} rounded-full bg-ink/[0.06]`} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
