@@ -107,14 +107,15 @@ export async function extractEntryUpdate(
   entry: Entry,
   messages: UIMessage[],
   asked: AskedQuestion | null = null,
+  { model = models.extract, onUsage }: { model?: string; onUsage?: (usage: { inputTokens?: number; outputTokens?: number }) => void } = {},
 ): Promise<EntryUpdate & { answer: TrailAnswer | null }> {
   if (messages.at(-1)?.role !== "user") return { website: null, goals: null, business: null, answer: null };
   const conversation = messages
     .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${textOf(m)}`)
     .join("\n\n");
 
-  const { output } = await generateText({
-    model: models.extract,
+  const { output, usage } = await generateText({
+    model,
     system,
     prompt: `Recorded so far: ${JSON.stringify(entry)}
 
@@ -129,6 +130,7 @@ Options (label = value): ${asked.chips.map((c) => `${c.label} = ${c.value}`).joi
     }`,
     output: Output.object({ schema: entryUpdateSchema }),
   });
+  onUsage?.(usage);
 
   // Drop any answer the user didn't actually give: its quote must appear in their messages.
   const said = messages.filter((m) => m.role === "user").map(textOf).join("\n");

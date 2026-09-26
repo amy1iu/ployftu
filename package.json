@@ -10,6 +10,7 @@
     "test": "vitest run",
     "eval:entry": "node --env-file=.env.local --import tsx evals/entry.eval.mts",
     "check:foundation": "node --env-file=.env.local --import tsx evals/foundation.check.mts",
+    "eval:decide": "node --env-file=.env.local --import tsx evals/decide.eval.mts",
     "eval:extract": "node --env-file=.env.local --import tsx evals/extract.eval.mts",
     "check:site": "node --env-file=.env.local --import tsx evals/site.check.mts",
     "check:quick-wins": "node --env-file=.env.local --import tsx evals/quick-wins.check.mts",
