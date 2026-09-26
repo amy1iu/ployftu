@@ -102,7 +102,8 @@ function describeItems(state: TrailState, docs: Doc[], done: boolean) {
     const intent = topIntent(state.workspace.entry);
     if (id === "target_customer" && intent) lines.push(`  For their goal, e.g. "${getIntent(intent).audienceQuestion}"`);
     const options = chipOptions(id, state);
-    if (options?.length) lines.push(`  Options: ${options.map((o, i) => `${i + 1}. ${o.label}`).join("; ")}`);
+    if (options?.length)
+      lines.push(`  Options (the answers the card offers, so ask a question they answer): ${options.map((o, i) => `${i + 1}. ${o.label}`).join("; ")}`);
     return lines.join("\n");
   };
   return `## Done: never ask about these again, not even to refine or confirm
