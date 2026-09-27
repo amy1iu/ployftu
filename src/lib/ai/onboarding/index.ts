@@ -28,6 +28,12 @@ import { turnSchemaFor, writeMessage, type Turn } from "./reply";
 /** Past this the planner is abandoned and code puts up the card (p95 is ~3s). PLANNER_TIMEOUT_MS overrides it. */
 const plannerTimeoutMs = () => Number(process.env.PLANNER_TIMEOUT_MS ?? 8000);
 
+/** Realtime delivers new map rows a little after this stream would deliver the card. */
+const REALTIME_BEAT_MS = 600;
+
+/** How long the next card waits for this answer's tasks to reach the map (usually under a second after planning). */
+const mapWaitMs = () => Number(process.env.MAP_WAIT_MS ?? 5000);
+
 /** How long the card after the website waits for their site to be read (usually 15-20s). SITE_WAIT_MS overrides it. */
 const siteWaitMs = () => Number(process.env.SITE_WAIT_MS ?? 20000);
 
@@ -100,12 +106,16 @@ export async function onboardingTurn({
   const siteDone = afterAnswer.crawl?.url === siteUrl && (afterAnswer.crawl?.status === "done" || afterAnswer.crawl?.status === "failed");
   const waitForSite = sideEffects && !!siteUrl && !siteDone;
 
+  // The tasks this answer reveals: started now, alongside planning, and waited
+  // for before the next card, so things land in order (answer, tasks, card).
+  const mapSync = sideEffects ? syncMap(workspaceId) : null;
+
   // Work that outlives the turn. The first deliverable is only known once the
   // stream has decided it, so its run hangs off a promise the stream always settles.
   let settleTurn: (started: Ploy | null) => void = () => {};
   const turnDone = new Promise<Ploy | null>((resolve) => (settleTurn = resolve));
   const background = Promise.all([
-    sideEffects && syncMap(workspaceId),
+    mapSync,
     siteRead,
     latest && recordProfileNotes(workspaceId, messages),
     turnDone.then((started) => started && runQuickWin(workspaceId, started.id)),
@@ -149,6 +159,8 @@ export async function onboardingTurn({
             })
           : null;
         if (started) writer.write({ type: "data-taskStarted", data: { ployId: started.id, title: started.title } });
+        // A first deliverable just started goes on the map too (a second sync, queued after the first).
+        const mapReady = sideEffects ? (started ? syncMap(workspaceId) : mapSync) : null;
         const state: TrailState = { workspace, docs, ploys: started ? [...ploys, started] : ploys, mapNodes, integrations, answered };
         const next = nextQuestion(state);
 
@@ -192,6 +204,10 @@ export async function onboardingTurn({
           console.warn(`Planner card dropped: ${turn.next.item}`);
           await logEvent(workspaceId, "planner_card_dropped", { item: turn.next.item });
         }
+        // Their tasks land before the next card (or the end of the trail); a slow sync doesn't hold it for long.
+        // New tasks reach the page over Realtime, a beat behind this stream, so the card waits that beat too.
+        const added = mapReady ? await Promise.race([mapReady, new Promise<number>((r) => setTimeout(() => r(0), mapWaitMs()))]) : 0;
+        if (added) await new Promise((r) => setTimeout(r, REALTIME_BEAT_MS));
         if (question) {
           // Say up front when this answer will start their first deliverable.
           const upcoming = upcomingQuickWin(question.slot, state);

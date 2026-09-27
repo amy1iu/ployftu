@@ -83,25 +83,27 @@ async function doSync(workspaceId: string) {
   // The first deliverable is always on the map, lit up.
   if (quickWin?.spec && !onMap.has(quickWin.spec.id)) add(quickWin.spec, quickWin.id);
   for (const spec of plannedTemplates(workspace, ploys, nodes)) add(spec, null);
-  if (!added.length) return;
+  if (!added.length) return 0;
 
   const newTemplates = added.filter((a) => !a.ploy_id).map((a) => getSpec(a.spec_id)!);
   const copy = newTemplates.length ? await personalize(newTemplates, workspace, docs) : new Map();
   await insertMapNodes(added.map((a) => ({ ...a, ...(copy.get(a.spec_id) ?? {}) })));
+  return added.length;
 }
 
 // One sync at a time per workspace, and at most one waiting: a waiting sync
 // reads fresh state when it runs, so extra requests can share it.
-const running = new Map<string, Promise<void>>();
-const waiting = new Map<string, Promise<void>>();
+const running = new Map<string, Promise<number>>();
+const waiting = new Map<string, Promise<number>>();
 
 /**
  * Adds the levels the map should now show: revealed regions get their slots
  * filled with the most relevant Ploybooks, personalized for this business.
  * Never removes or moves levels. Call it whenever something that shapes the
- * map changes (answers, site, first deliverable).
+ * map changes (answers, site, first deliverable). Resolves to how many levels
+ * it added (0 on failure, which is logged).
  */
-export function syncMap(workspaceId: string): Promise<void> {
+export function syncMap(workspaceId: string): Promise<number> {
   const queued = waiting.get(workspaceId);
   if (queued) return queued;
   const run = (running.get(workspaceId) ?? Promise.resolve())
@@ -109,7 +111,10 @@ export function syncMap(workspaceId: string): Promise<void> {
       waiting.delete(workspaceId);
       return doSync(workspaceId);
     })
-    .catch((error) => console.error("Failed to sync map", error))
+    .catch((error) => {
+      console.error("Failed to sync map", error);
+      return 0;
+    })
     .finally(() => {
       if (running.get(workspaceId) === run) running.delete(workspaceId);
     });

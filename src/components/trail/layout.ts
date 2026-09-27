@@ -1,9 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { OnboardingUIMessage, TaskStartedData } from "@/lib/ai/onboarding/messages";
 import { getSpec } from "@/lib/catalog";
-import type { MapNode, Ploy } from "@/lib/db/types";
-import { legacyAnchors } from "@/lib/map/plan";
+import type { MapNode, Ploy, Workspace } from "@/lib/db/types";
+import { legacyAnchors, plannedTemplates } from "@/lib/map/plan";
 import { nodeState, type NodeState } from "@/lib/map/state";
 import {
   openQuestion,
@@ -13,6 +14,51 @@ import {
   type TrailMetadata,
 } from "@/lib/onboarding/trail";
 import { useWorkspace } from "../workspace/workspace-provider";
+
+/** The beat between the last task landing and You're set up. */
+const END_BEAT_MS = 800;
+
+/**
+ * True once `on` has held for `ms`, and false the moment it isn't. Already on
+ * when the component mounts (a finished trail opened later) counts as held.
+ */
+function useHeld(on: boolean, ms: number) {
+  const [held, setHeld] = useState(on);
+  useEffect(() => {
+    const timer = setTimeout(() => setHeld(on), on ? ms : 0);
+    return () => clearTimeout(timer);
+  }, [on, ms]);
+  return on && held;
+}
+
+/** How long a first win that finished can still hold You're set up while its map lands. */
+const SETTLE_AFTER_WIN_MS = 60_000;
+/** A first win building longer than this is treated as stuck, and stops holding the end. */
+const STUCK_WIN_MS = 3 * 60_000;
+
+/**
+ * Whether everything the trail kicked off has landed, so You're set up can be
+ * the last thing to appear: the first win isn't building, and the map has every
+ * task it's going to show (the fog lifts once the first win is done). Only a
+ * first win that finished in the last minute holds the end, so older
+ * workspaces, whose maps predate today's catalog, don't wait on tasks that will
+ * never come; one stuck building stops holding it after three minutes.
+ */
+function useSettled(workspace: Workspace, ploys: Ploy[], mapNodes: MapNode[], quickWin: Ploy | undefined) {
+  const [now, setNow] = useState(() => Date.now());
+  const age = quickWin ? now - Date.parse(quickWin.updated_at) : Infinity;
+  const building = quickWin?.status === "running" && age < STUCK_WIN_MS;
+  const mapPending =
+    plannedTemplates(workspace, ploys, mapNodes).length > 0 || (!!quickWin?.spec && !mapNodes.some((n) => n.spec_id === quickWin.spec!.id));
+  const settled = !building && !(mapPending && age < SETTLE_AFTER_WIN_MS);
+  // While something's pending, keep time moving so the limits above can expire.
+  useEffect(() => {
+    if (settled) return;
+    const tick = setInterval(() => setNow(Date.now()), 2000);
+    return () => clearInterval(tick);
+  }, [settled]);
+  return settled;
+}
 
 // The Getting Started trail's layout, shared by the trail itself and the task
 // list beside it (which also shows on task ploys): its rows, in order, and
@@ -37,6 +83,8 @@ export type Row =
   | { kind: "reply"; key: null; id: string; said: string | null; text: string | null }
   | { kind: "question"; key: string; question: QuestionData; lead: string | null }
   | { kind: "thinking"; key: null }
+  /** The trail is answered, but the first win or its map is still landing: You're set up comes last. */
+  | { kind: "settling"; key: "end"; building: boolean }
   | { kind: "end"; key: "end" };
 
 const textOf = (message: OnboardingUIMessage) =>
@@ -53,7 +101,12 @@ const metaOf = (m: OnboardingUIMessage | undefined) => (m?.metadata ?? {}) as Tr
 /** The trail's rows, in order, from the Getting Started messages. */
 export function buildRows(
   messages: OnboardingUIMessage[],
-  { hasRead, quickWin, busy }: { hasRead: boolean; quickWin: Ploy | undefined; busy: boolean },
+  {
+    hasRead,
+    quickWin,
+    busy,
+    settled = true,
+  }: { hasRead: boolean; quickWin: Ploy | undefined; busy: boolean; settled?: boolean },
 ): Row[] {
   const rows: Row[] = [{ kind: "home", key: null }];
   // Each slot's row: conversations from earlier versions, where answers could be changed, update it in place.
@@ -70,7 +123,8 @@ export function buildRows(
       const meta = metaOf(message);
       const slot = meta.slot ?? asked?.slot;
       if (asked && slot)
-        rows.push({ kind: "answered", key: `pending-${message.id}`, slot, summary: textOf(message), pending: true, asked: cardFor(asked, slot), said: null });
+        // Keyed as it will be once answered, so the tasks beside it don't blink out while it saves.
+        rows.push({ kind: "answered", key: slot === "website" ? (hasRead ? "website" : "site") : slot, slot, summary: textOf(message), pending: true, asked: cardFor(asked, slot), said: null });
       else rows.push({ kind: "reply", key: null, id: message.id, said: textOf(message), text: null });
       return;
     }
@@ -115,7 +169,8 @@ export function buildRows(
   // From the moment they answer until the next card (or the wrap-up) arrives:
   // whenever a turn is in flight and no card is on screen.
   if (busy && !rows.some((r) => r.kind === "question")) rows.push({ kind: "thinking", key: null });
-  if (!busy && !open) rows.push({ kind: "end", key: "end" });
+  if (!busy && !open)
+    rows.push(settled ? { kind: "end", key: "end" } : { kind: "settling", key: "end", building: quickWin?.status === "running" });
   return rows;
 }
 
@@ -130,12 +185,15 @@ export type ListedTask = {
 export function useTrailLayout(messages: OnboardingUIMessage[], busy: boolean) {
   const { workspace, ploys, mapNodes, integrations, docs } = useWorkspace();
   const quickWin = ploys.find((p) => p.spec?.source === "quick_win");
-  const rows = buildRows(messages, { hasRead: !!workspace.crawl, quickWin, busy });
+  const settled = useSettled(workspace, ploys, mapNodes, quickWin);
+  // You're set up comes a beat after everything else has landed, so it's clearly the last thing.
+  const endReady = useHeld(!busy && !openQuestion(messages) && settled, END_BEAT_MS);
+  const rows = buildRows(messages, { hasRead: !!workspace.crawl, quickWin, busy, settled: endReady });
   const active = rows.find((r): r is Extract<Row, { kind: "question" }> => r.kind === "question");
 
   // Place each task beside its anchor's row; ones waiting on a question that hasn't come up yet stay hidden.
   const keys = new Set(rows.map((r) => r.key).filter(Boolean));
-  const done = rows.some((r) => r.kind === "end");
+  const done = rows.some((r) => r.key === "end");
   const states = new Map(mapNodes.map((n) => [n.id, nodeState(n, { ploys, integrations, mapNodes, docs })]));
   const byRow = new Map<string, MapNode[]>();
   for (const node of mapNodes) {

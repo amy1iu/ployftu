@@ -216,6 +216,12 @@ export function Trail({
                     <NextCardPlaceholder />
                   </TrailRow>
                 );
+              case "settling":
+                return (
+                  <TrailRow key="end" left={left} right={right} spine="to">
+                    <NextCardPlaceholder caption={row.building ? "Finishing your first win…" : "Putting your map together…"} />
+                  </TrailRow>
+                );
               case "question":
                 if (row.question.alt)
                   return (

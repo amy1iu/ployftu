@@ -385,13 +385,14 @@ export function ReplyNode({ said, text }: { said: string | null; text: string })
  * A faint outline of a card, not a spinner: the trail keeps its shape, and the
  * card pops in over it.
  */
-export function NextCardPlaceholder() {
+export function NextCardPlaceholder({ caption }: { caption?: string }) {
   return (
     <div
       role="status"
-      aria-label="Choosing your next question"
+      aria-label={caption ?? "Choosing your next question"}
       className="w-[300px] animate-[toast-in_300ms_ease-out] rounded-2xl border border-dashed border-ink/20 bg-white/60 p-3.5"
     >
+      {caption && <p className="mb-2.5 text-[12.5px] text-muted">{caption}</p>}
       <div className="space-y-2 motion-safe:animate-pulse">
         <div className="h-2.5 w-3/4 rounded-full bg-ink/10" />
         <div className="h-2.5 w-1/2 rounded-full bg-ink/10" />
