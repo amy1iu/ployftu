@@ -149,9 +149,10 @@ describe("toQuestion", () => {
     expect(q?.chips.map((c) => c.label)).toEqual(["Online courses", "Handmade crafts", "Not sure yet"]);
   });
 
-  it("lets them type what they sell without a 'not sure' chip", () => {
+  it("lets them type what they sell, with no guessed chips", () => {
     const noSite = workspace({ website: { status: "none", url: null } });
-    expect(toQuestion(planned({ item: "business_model", question: "What do you sell?" }), state({ workspace: noSite }))?.chips).toEqual([]);
+    const guesses = ["Online courses and coaching", "Handmade crafts and art", "Consulting and freelance services"];
+    expect(toQuestion(planned({ item: "business_model", question: "What do you sell?", chips: guesses }), state({ workspace: noSite }))?.chips).toEqual([]);
   });
 
   it("keeps goal chip values from the catalog, and 'not sure'", () => {

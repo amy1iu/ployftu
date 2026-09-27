@@ -248,6 +248,31 @@ describe("onboarding turn, when things fail", () => {
     expect(vi.mocked(logEvent).mock.calls.some(([, name, props]) => name === "turn_error" && props?.stage === "quick_win")).toBe(true);
   });
 
+  it("records what they typed, not the nearest suggestion", async () => {
+    // The extractor sees no suggestions to match; even if it named one, their words stand.
+    fake.extract = async () => ({
+      website: null,
+      goals: null,
+      business: null,
+      answer: { answered: true, matchedChip: "Freelancers", summary: "Local restaurants", offScript: null },
+    });
+    const { model } = plannerReturning({ message: "", next: null });
+    fake.planner = model;
+    const customers = card({
+      slot: "target_customer",
+      question: "Who are your best customers today?",
+      chips: [
+        { label: "Freelancers", value: "Freelancers" },
+        { label: "Not sure yet", value: "unsure" },
+      ],
+    });
+    const turn = await run([customers, typed("Local restaurants that do their own books")]);
+    const { extractEntryUpdate } = await import("@/lib/ai/onboarding/extract");
+    expect(vi.mocked(extractEntryUpdate).mock.calls.at(-1)?.[2]).toMatchObject({ slot: "target_customer", chips: [] });
+    expect(turn.answered).toMatchObject({ slot: "target_customer", summary: "Local restaurants" });
+    expect(vi.mocked(patchProfileSections).mock.calls[0][1]).toEqual([expect.objectContaining({ key: "who-we-serve", body: "Local restaurants" })]);
+  });
+
   it("reads a conversation saved by an earlier version", async () => {
     fake.workspace.entry.goals = { status: "has", intents: [{ id: "get_more_leads", weight: 1 }], inUserWords: null, unmatched: null };
     const { model } = plannerReturning({ message: "", next: null });

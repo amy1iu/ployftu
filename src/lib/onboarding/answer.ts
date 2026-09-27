@@ -11,7 +11,7 @@ import { getDocs, getWorkspace, patchProfileSections, updateWorkspace } from "@/
 import { EMPTY_SECTION, readSection } from "@/lib/docs/markdown";
 import { normalizeUrl } from "./entry";
 import { applyEntryUpdate, type EntryUpdate } from "./set-entry";
-import { soundsUnsure, type AnsweredSlot, type Chip, type QuestionData, type TrailMetadata } from "./trail";
+import { chipsCarryValues, soundsUnsure, type AnsweredSlot, type Chip, type QuestionData, type TrailMetadata } from "./trail";
 
 export type AppliedAnswer = {
   /** The slot it answered, or null if it didn't answer the question. */
@@ -163,7 +163,9 @@ async function applyTyped(
   userTurns: number,
 ): Promise<AppliedAnswer> {
   const text = textOf(message);
-  const extracted = await extractEntryUpdate(workspace.entry, messages, { slot, question: card.question, chips: card.chips });
+  // Suggestions aren't answers to match: typed words stand as they are (see chipsCarryValues).
+  const valued = chipsCarryValues(slot);
+  const extracted = await extractEntryUpdate(workspace.entry, messages, { slot, question: card.question, chips: valued ? card.chips : [] });
   const { answer } = extracted;
   // Asking for something Ploy doesn't do, off-script, isn't a goal: note it, reply, and ask again.
   const askedForOther = extracted.goals?.status === "has" && !extracted.goals.intents.length && !!answer?.offScript;
@@ -173,7 +175,7 @@ async function applyTyped(
     await logEvent(workspace.id, "unmatched_intent", { text: unmatched });
   }
   const update = askedForOther ? { ...extracted, goals: null } : extracted;
-  const matched = answer?.matchedChip ? card.chips.find((c) => c.value === answer.matchedChip) : undefined;
+  const matched = valued && answer?.matchedChip ? card.chips.find((c) => c.value === answer.matchedChip) : undefined;
   const applied =
     update.website || update.goals || update.business ? await applyEntryUpdate(workspace.id, update, { userTurns }) : null;
   const result: AppliedAnswer = {

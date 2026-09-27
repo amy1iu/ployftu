@@ -221,12 +221,22 @@ export function pickChips(options: Chip[], wanted: string[]): Chip[] {
 }
 
 /** The model's own chips for an open question: up to three, plus "not sure" (except for what they sell). */
+/**
+ * Cards whose chips carry values code acts on (a goal, a quick win). On every
+ * other card the chips are the model's suggestions, and what someone types is
+ * the answer: it's never swapped for the nearest suggestion.
+ */
+export const chipsCarryValues = (slot: ContextItemId) =>
+  slot === "website" || slot === "goal_detail" || slot === "quick_win_offer" || slot === "tool";
+
 function openChips(id: ContextItemId, labels: string[]): Chip[] {
+  // What they sell is theirs to say: with nothing known, suggestions would only be guesses.
+  if (id === "business_model") return [];
   // Models carry the "<n>. " numbering of option chips over to their own; strip it.
   const own = [...new Set(labels.map((l) => l.replace(/^\s*\d+[.)]\s*/, "").trim()).filter((l) => l && !soundsUnsure(l) && !/^skip\b/i.test(l)))]
     .slice(0, 3)
     .map((label) => ({ label, value: label }));
-  return id === "business_model" ? own : [...own, notSure];
+  return [...own, notSure];
 }
 
 /**
