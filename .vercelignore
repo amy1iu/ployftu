@@ -1,0 +1,5 @@
+# Never upload local secrets or scratch with a CLI deploy (Vercel reads env vars from the project).
+.env*
+!.env.example
+evals/results
+tsconfig.tsbuildinfo
