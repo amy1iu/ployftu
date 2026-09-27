@@ -1,21 +1,41 @@
 "use client";
 
 import { ArrowUp } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { updateOnboardingStatus } from "@/app/actions";
+import { startPloy, updateOnboardingStatus } from "@/app/actions";
+import { Confetti } from "../confetti";
 import { useWorkspace } from "../workspace/workspace-provider";
+
+/** How long the confetti plays before Overview opens. */
+const CELEBRATE_MS = 1600;
 
 /**
  * The end of the trail. Rather than a how-to, it leaves them with the idea of
  * Ploy as a teammate: it knows the business, remembers, keeps finding and doing
- * the work, and is worked with by just telling it things. (What they tell it
- * here updates their profile Docs, through profile notes.) Then a box to do
- * exactly that, and a button to finish onboarding.
+ * the work, and is worked with by just telling it things. Then a box to do
+ * exactly that (it starts a new ploy; what they say about the business there
+ * updates their profile), and a button to finish onboarding: confetti, then
+ * Overview.
  */
-export function EndNode({ disabled, onAsk }: { disabled: boolean; onAsk: (text: string) => void }) {
+export function EndNode({ disabled }: { disabled: boolean }) {
   const { workspace } = useWorkspace();
-  const [finishing, startTransition] = useTransition();
+  const router = useRouter();
+  const [finishing, startFinishing] = useTransition();
+  const [starting, startStarting] = useTransition();
+  const [celebrating, setCelebrating] = useState(false);
   const [draft, setDraft] = useState("");
+
+  const finish = () => {
+    setCelebrating(true);
+    startFinishing(async () => {
+      await Promise.all([
+        updateOnboardingStatus(workspace.id, "completed"),
+        new Promise((r) => setTimeout(r, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : CELEBRATE_MS)),
+      ]);
+      router.push("/overview");
+    });
+  };
   const name = workspace.name === "New workspace" ? "your business" : workspace.name;
 
   return (
@@ -32,24 +52,27 @@ export function EndNode({ disabled, onAsk }: { disabled: boolean; onAsk: (text: 
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (!draft.trim()) return;
-          onAsk(draft.trim());
-          setDraft("");
+          const text = draft.trim();
+          if (!text) return;
+          startStarting(async () => {
+            const id = await startPloy(workspace.id, text);
+            router.push(`/ploys/${id}`);
+          });
         }}
         className="flex gap-1.5"
       >
         <input
           value={draft}
-          disabled={disabled}
+          disabled={disabled || starting}
           onChange={(e) => setDraft(e.currentTarget.value)}
-          placeholder="Message Ploy"
-          aria-label="Message Ploy"
+          placeholder="Start a new ploy"
+          aria-label="Start a new ploy"
           className="min-w-0 flex-1 rounded-lg border border-border bg-canvas px-2.5 py-1.5 text-[13px] outline-none focus:border-ink/40"
         />
         <button
           type="submit"
-          disabled={disabled || !draft.trim()}
-          aria-label="Send"
+          disabled={disabled || starting || !draft.trim()}
+          aria-label="Start ploy"
           className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink text-white disabled:opacity-50"
         >
           <ArrowUp size={15} />
@@ -59,12 +82,13 @@ export function EndNode({ disabled, onAsk }: { disabled: boolean; onAsk: (text: 
         <button
           type="button"
           disabled={finishing}
-          onClick={() => startTransition(() => updateOnboardingStatus(workspace.id, "completed"))}
+          onClick={finish}
           className="rounded-full border border-ink/20 px-3.5 py-1.5 text-[12.5px] text-ink hover:bg-canvas disabled:opacity-60"
         >
           {finishing ? "Finishing…" : "Finish onboarding"}
         </button>
       )}
+      {celebrating && <Confetti />}
     </div>
   );
 }

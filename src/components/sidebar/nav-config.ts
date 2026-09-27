@@ -16,7 +16,7 @@ export type NavItem = { id: string; label: string; icon: LucideIcon; href?: stri
 
 export const primaryNav: NavItem[] = [
   { id: "new-ploy", label: "New Ploy", icon: Plus },
-  { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "overview", label: "Overview", icon: LayoutDashboard, href: "/overview" },
   { id: "ploys", label: "Ploys", icon: MessageSquare },
   { id: "sites", label: "Sites", icon: Globe },
 ];

@@ -54,7 +54,7 @@ export function TaskPanelProvider({ children }: { children: ReactNode }) {
   return (
     <TaskPanelContext
       value={{
-        available: wide && (onGettingStarted || pathname.startsWith("/ploys/")),
+        available: wide && (onGettingStarted || pathname === "/overview" || pathname.startsWith("/ploys/")),
         open,
         toggle: () => setOpen((o) => !o),
         selected,

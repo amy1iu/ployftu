@@ -46,7 +46,7 @@ export type Said = {
   problems: string[];
 };
 
-function messageRule(said: Said | null, planning: boolean, finishing: boolean) {
+function messageRule(said: Said | null) {
   if (said && !said.open)
     return "They've finished the setup questions and are chatting freely. Answer what they said in under 70 words, statements only.";
   if (said?.offScript)
@@ -55,11 +55,8 @@ function messageRule(said: Said | null, planning: boolean, finishing: boolean) {
     return said.problems.length
       ? `Their answer couldn't be recorded: ${said.problems.join(" ")} Say so in one short sentence, statements only.`
       : "Their latest message didn't answer the question. Respond to what they said in one short, friendly sentence, statements only.";
-  if (finishing)
-    return "The trail is complete: one or two sentences wrapping up (their first deliverable is building, their map is ready to explore), statements only.";
-  return planning
-    ? 'Leave it empty (""), except when you finish: then one or two sentences on what happens now (e.g. their first deliverable is building, their map is ready), statements only.'
-    : 'Leave it empty ("").';
+  // The trail ends on the You're set up card, which says what happens now; no wrap-up message.
+  return 'Leave it empty ("").';
 }
 
 /** What's recorded for an item, in a few words, for the "done" list. */
@@ -211,7 +208,7 @@ export function buildTrailPrompt({
 The user is on Getting Started: a short trail of question cards, each answerable in under a minute by tapping a chip or typing. Each answer unlocks tasks on their growth map. You run the trail: each turn you reply to what they said (if needed) and choose the next card, or finish.
 
 # What to write
-- message: ${messageRule(said, planning, planning && ready.done)}
+- message: ${messageRule(said)}
 - next: ${next}
   - item: the item the card asks about (from Open, or Inferred to confirm).
   - question: one plain sentence, 15 words or fewer, ending in "?", specific to their business. No lead-in pleasantries.

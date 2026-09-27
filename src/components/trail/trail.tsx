@@ -77,13 +77,11 @@ export function Trail({
   messages,
   busy,
   onAnswer,
-  onAsk,
   footer,
 }: {
   messages: OnboardingUIMessage[];
   busy: boolean;
   onAnswer: (answer: Answer) => void;
-  onAsk: (text: string) => void;
   /** Shown at the end of the trail (e.g. an error with a retry). */
   footer?: ReactNode;
 }) {
@@ -243,7 +241,7 @@ export function Trail({
               case "end":
                 return (
                   <TrailRow key="end" left={left} right={right} spine="to">
-                    <EndNode disabled={busy} onAsk={onAsk} />
+                    <EndNode disabled={busy} />
                   </TrailRow>
                 );
             }

@@ -42,7 +42,6 @@ export function OnboardingChat() {
         messages={shown}
         busy={busy}
         onAnswer={({ text, slot, value }) => send({ text, metadata: { slot, value } })}
-        onAsk={(text) => send({ text })}
         footer={
           failed && (
             <p role="alert" className="pb-6 text-center text-[13px] text-red-600">

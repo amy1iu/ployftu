@@ -8,6 +8,7 @@ import type { Ploy } from "@/lib/db/types";
 import { essence, type AnsweredSlot, type Chip, type QuestionData } from "@/lib/onboarding/trail";
 import type { SiteCrawl } from "@/lib/site/types";
 import { Markdown } from "../markdown";
+import { PloyAvatar } from "../ploy-avatar";
 
 // The pieces of the Getting Started trail's spine: question cards, answered
 // pills, and the nodes for work running in the background.
@@ -50,7 +51,7 @@ export function QuestionCard({
   return (
     <div className={`${width} animate-[level-pop_400ms_ease-out] rounded-2xl border border-ink/25 bg-white p-3.5 text-left`}>
       <div className="mb-1.5 flex items-center gap-1.5 text-[12px] text-muted">
-        <span className="flex size-[18px] items-center justify-center rounded-full bg-ink text-[10px] font-semibold text-white">P</span>
+        <PloyAvatar size={18} />
         Ploy
       </div>
       {lead && <p className="mb-1.5 text-[13px] leading-snug text-muted">{lead}</p>}

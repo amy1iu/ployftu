@@ -8,6 +8,7 @@ import { integrationCategoryIds, type IntegrationCategory } from "@/lib/catalog/
 import { logEvent } from "@/lib/db/events";
 import {
   connectIntegration as saveIntegration,
+  createPloy,
   createWorkspace,
   getPloy,
   getWorkspace,
@@ -67,6 +68,24 @@ export async function markPloyRead(ployId: string) {
 
 export async function sendPloyMessage(ployId: string, text: string) {
   await replyInPloy(ployId, text);
+}
+
+/** A ploy's title from its first message: the first sentence, cut at a word near 48 characters. */
+function ployTitle(text: string) {
+  const first = text.split(/(?<=[.?!])\s/)[0].trim();
+  if (first.length <= 48) return first;
+  const cut = first.slice(0, 48);
+  return `${cut.slice(0, cut.lastIndexOf(" ") > 20 ? cut.lastIndexOf(" ") : 48)}…`;
+}
+
+/** Starts a chat ploy from a message (the You're set up card, Overview) and returns its id; Ploy's reply follows. */
+export async function startPloy(workspaceId: string, text: string) {
+  const message = text.trim().slice(0, 4000);
+  if (!message) throw new Error("Say what you need first");
+  const ploy = await createPloy({ workspace_id: workspaceId, title: ployTitle(message), spec: null, status: "idle", messages: [] });
+  await logEvent(workspaceId, "ploy_started", { from: "message" });
+  after(() => replyInPloy(ploy.id, message));
+  return ploy.id;
 }
 
 /** Starts a level from the map and returns its task ploy's id (the work runs after the response). */

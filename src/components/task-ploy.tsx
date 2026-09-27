@@ -52,7 +52,8 @@ export function TaskPloy({ id }: { id: string }) {
         title={
           <span className="flex items-center gap-2.5">
             {ploy.title}
-            <span className="rounded-full bg-active px-2 py-0.5 text-[11px] text-muted">{statusLabel[ploy.status]}</span>
+            {/* A chat ploy (started from a message) has no run to report on. */}
+            {ploy.spec && <span className="rounded-full bg-active px-2 py-0.5 text-[11px] text-muted">{statusLabel[ploy.status]}</span>}
           </span>
         }
       />
@@ -62,7 +63,8 @@ export function TaskPloy({ id }: { id: string }) {
             {messages.map((message) => (
               <Message key={message.id} message={message} />
             ))}
-            {replying && messages.at(-1)?.role === "user" && <ThinkingIndicator />}
+            {/* Ploy always answers their last message; it may come from another page (a new ploy). */}
+            {messages.at(-1)?.role === "user" && <ThinkingIndicator />}
             <div ref={bottomRef} />
           </div>
         </div>
@@ -70,7 +72,7 @@ export function TaskPloy({ id }: { id: string }) {
           <TaskActions ploy={ploy} />
           <Composer
             disabled={replying}
-            placeholder={ploy.status === "running" ? "Ask about this while it runs..." : "Ask about this, or what to change..."}
+            placeholder={!ploy.spec ? "Reply to Ploy..." : ploy.status === "running" ? "Ask about this while it runs..." : "Ask about this, or what to change..."}
             onSend={(text) =>
               startReply(async () => {
                 addPending(text);

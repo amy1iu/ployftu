@@ -42,7 +42,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
           {children}
         </main>
-        {/* The task list: beside Getting Started and task ploys, and kept open between them. */}
+        {/* The task list: beside Getting Started, Overview, and task ploys, and kept open between them. */}
         <TaskPanel />
         <TaskToasts />
       </div>
