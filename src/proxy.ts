@@ -1,31 +1,23 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
+import { PASS_COOKIE, passKey, sitePassword } from "@/lib/site-password";
 
-// A simple password in front of the whole demo: the browser's own sign-in
-// prompt (HTTP Basic Auth), any username, the password in SITE_PASSWORD. Off
-// when SITE_PASSWORD isn't set, so local dev stays open. It covers pages, the
-// chat route, and Server Functions (they post to the page's route), not static
-// assets. It's a gate for a lightly shared URL, not user accounts.
-
-const same = (a: string, b: string) => {
-  const x = Buffer.from(a);
-  const y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
-};
+// A simple password in front of the whole demo: pages send you to /unlock (one
+// field, no username) until the cookie it sets is there. The chat route and
+// Server Functions (they post to the page's route) are refused instead. Off
+// when SITE_PASSWORD isn't set, so local dev stays open. It's a gate for a
+// lightly shared URL, not user accounts.
 
 export function proxy(request: NextRequest) {
-  const password = process.env.SITE_PASSWORD;
+  const password = sitePassword();
   if (!password) return NextResponse.next();
 
-  const [scheme, encoded] = (request.headers.get("authorization") ?? "").split(" ");
-  if (scheme === "Basic" && encoded) {
-    const decoded = Buffer.from(encoded, "base64").toString();
-    if (same(decoded.slice(decoded.indexOf(":") + 1), password)) return NextResponse.next();
-  }
-  return new NextResponse("Password required", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="Ploy demo", charset="UTF-8"' },
-  });
+  const { pathname, search } = request.nextUrl;
+  if (pathname === "/unlock" || request.cookies.get(PASS_COOKIE)?.value === passKey(password)) return NextResponse.next();
+
+  if (request.method !== "GET" || pathname.startsWith("/api/")) return new NextResponse("Password required", { status: 401 });
+  const unlock = new URL("/unlock", request.url);
+  if (pathname !== "/") unlock.searchParams.set("next", pathname + search);
+  return NextResponse.redirect(unlock);
 }
 
 export const config = {
