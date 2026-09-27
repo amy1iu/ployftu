@@ -284,7 +284,8 @@ export function SiteReadNode({
   const [fixing, setFixing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, startSaving] = useTransition();
-  const box = "w-[300px] rounded-2xl border border-dashed border-ink/25 bg-white p-3 text-[13px]";
+  // Dashed means "not there yet" across the trail: only while the site is being read.
+  const box = "w-[300px] rounded-2xl border border-ink/25 bg-white p-3 text-[13px]";
 
   if (crawl.status === "failed")
     return (
@@ -294,7 +295,7 @@ export function SiteReadNode({
     );
   if (crawl.status !== "done" || !crawl.summary)
     return (
-      <div className={box}>
+      <div className={`${box} border-dashed`}>
         <p className="flex items-center gap-2 text-ink">
           <LoaderCircle size={14} className="animate-spin text-subtle" />
           {crawl.status === "summarizing" ? `Drafting your profile from ${host}` : `Reading ${host}`}
