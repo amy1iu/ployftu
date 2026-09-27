@@ -1,5 +1,15 @@
-# Never upload local secrets or scratch with a CLI deploy (Vercel reads env vars from the project).
+# What a CLI deploy leaves behind. With this file present, Vercel ignores
+# .gitignore, so build output and dependencies are listed here too.
+node_modules
+.next
+out
+build
+coverage
+.DS_Store
+*.pem
+supabase/.temp
+tsconfig.tsbuildinfo
+evals/results
+# Never upload local secrets (Vercel reads env vars from the project).
 .env*
 !.env.example
-evals/results
-tsconfig.tsbuildinfo
