@@ -165,21 +165,22 @@ export function nextQuestion(state: TrailState): QuestionData | "plan" | null {
 }
 
 /**
- * The items the trail asks about. The tool someone uses isn't one: they name
- * it when they connect it, from the task that needs it. (`tool` stays in the
- * registry so answers saved by earlier versions still record.)
+ * The items the trail asks about. Not the tool someone uses (they name it when
+ * they connect it, from the task that needs it), and not a quick win to pick:
+ * their first deliverable comes from the questions themselves, and the card
+ * whose answer starts it says so. (Both stay in the registry so answers saved
+ * by earlier versions still record.)
  */
-export const trailItems: readonly ContextItemId[] = contextItemIds.filter((id) => id !== "tool");
+export const trailItems: readonly ContextItemId[] = contextItemIds.filter((id) => id !== "tool" && id !== "quick_win_offer");
 
-/** Where an item stands, for the planner. `waiting`: the quick win, before any would be specific to them. */
-export type ItemStatus = "known" | "answered" | "inferred" | "reading" | "missing" | "waiting";
+/** Where an item stands, for the planner. */
+export type ItemStatus = "known" | "answered" | "inferred" | "reading" | "missing";
 
 export function itemStatus(id: ContextItemId, state: TrailState): ItemStatus {
   const item = contextItems[id];
   if (item.known(state)) return "known";
   // Said "not sure" or skipped: asked already.
   if (state.answered.has(id)) return "answered";
-  if (id === "quick_win_offer" && !quickWinChips(state).length) return "waiting";
   if (item.inferred(state)) return "inferred";
   // Their site is being read and will say what they sell.
   const { website } = state.workspace.entry;
@@ -191,7 +192,6 @@ export function itemStatus(id: ContextItemId, state: TrailState): ItemStatus {
 /** The chips an item's card must use, when their values drive code; null when the model writes them. */
 export function chipOptions(id: ContextItemId, state: TrailState): Chip[] | null {
   if (id === "goal_detail") return goalChips(state.workspace);
-  if (id === "quick_win_offer") return quickWinChips(state);
   return null;
 }
 
@@ -201,7 +201,6 @@ export type PlannedCard = {
   question: string;
   hint: string | null;
   chips: string[];
-  alt: { question: string; hint: string | null; chips: string[] } | null;
 };
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -248,48 +247,35 @@ function openChips(id: ContextItemId, labels: string[]): Chip[] {
  * to finish. A pick code can't serve (the website again, a second quick win,
  * a tool when none is needed) finishes too; the eval counts how often.
  */
-/** The words on cards whose answers are catalog options: they always match their chips. */
-const optionCardWords = {
-  goal_detail: { question: "What do you most want to grow in the next few months?", hint: "Decides which tasks fill your map." },
-  quick_win_offer: { question: "Want something useful built in the next few minutes?", hint: "Pick one and I'll start right away." },
-};
+/** The goal card's words: its answers are catalog options, so it always says what they answer. */
+const goalCardWords = { question: "What do you most want to grow in the next few months?", hint: "Decides which tasks fill your map." };
 
 export function toQuestion(planned: PlannedCard | null, state: TrailState): QuestionData | null {
   if (!planned || planned.item === "website" || !trailItems.includes(planned.item)) return null;
   const { item } = planned;
-  const quickWinRunning = contextItems.quick_win_offer.known(state);
-  if (item === "quick_win_offer" && quickWinRunning) return null;
 
   const options = chipOptions(item, state);
   let chips = options ? pickChips(options, planned.chips) : openChips(item, planned.chips);
   // "Not sure" always stays on the goal card.
   if (item === "goal_detail" && !chips.some((c) => c.value === notSure.value)) chips = [...chips, notSure];
 
-  // Only quick wins that are ready are offered, beside the card or on their own.
-  const ready = quickWinChips(state);
-  if (item === "quick_win_offer" && !ready.length) return null;
-  const alt =
-    planned.alt && item !== "quick_win_offer" && !quickWinRunning && ready.length
-      ? { slot: "quick_win_offer" as const, ...optionCardWords.quick_win_offer, chips: pickChips(ready, planned.alt.chips) }
-      : null;
-  // Cards whose answers are catalog options say what the options answer; the model's words could drift from them.
-  const fixed = item === "goal_detail" || item === "quick_win_offer" ? optionCardWords[item] : null;
+  // The model's words could drift from the goal card's catalog options.
+  const fixed = item === "goal_detail" ? goalCardWords : null;
   return {
     slot: item,
     question: fixed?.question ?? (cleanQuestion(planned.question) || "What should I know next?"),
     hint: fixed ? fixed.hint : planned.hint,
     chips,
     category: null,
-    alt,
+    alt: null,
     offScript: false,
   };
 }
 
 /**
  * A card from code alone, for a turn whose planner failed or timed out: the
- * first open item in the trail's usual order (what they sell with no site to
- * read, their goal with any ready quick win beside it, who they want to reach,
- * then a quick win), in plain wording. Null when there's nothing left to ask.
+ * first open essential (what they sell with no site to read, their goal, who
+ * they want to reach), in plain wording. Null when there's nothing left to ask.
  */
 export function fallbackCard(state: TrailState): QuestionData | null {
   if (nextQuestion(state) !== "plan") return null;
@@ -303,17 +289,12 @@ export function fallbackCard(state: TrailState): QuestionData | null {
     alt: null,
     offScript: false,
   });
-  const offer = { question: "Want something useful in the next few minutes?", hint: "Pick one and I'll start right away.", chips: quickWinChips(state) };
   if (open("business_model")) return card("business_model", "In a sentence, what does your business sell?", null, []);
-  if (open("goal_detail")) {
-    const goal = card("goal_detail", "What do you most want to grow in the next few months?", "Decides which tasks fill your map.", goalChips(state.workspace));
-    return open("quick_win_offer") ? { ...goal, alt: { slot: "quick_win_offer", ...offer } } : goal;
-  }
+  if (open("goal_detail")) return card("goal_detail", goalCardWords.question, goalCardWords.hint, goalChips(state.workspace));
   if (open("target_customer")) {
     const intent = state.workspace.entry.goals.intents[0]?.id;
     return card("target_customer", intent ? getIntent(intent).audienceQuestion : "Who are your best customers?", "So everything Ploy makes speaks to them.", [notSure]);
   }
-  if (open("quick_win_offer")) return card("quick_win_offer", offer.question, offer.hint, offer.chips);
   return null;
 }
 

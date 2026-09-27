@@ -8,7 +8,6 @@ import { getProfileSection, type ProfileDocSlug } from "@/lib/docs/profile";
 import { defaultQuickWin, topIntent, type Entry } from "@/lib/onboarding/entry";
 import {
   chipOptions,
-  quickWinChips,
   quickWinNeeds,
   itemStatus,
   trailItems,
@@ -48,7 +47,6 @@ function recorded(id: ContextItemId, state: TrailState, docs: Doc[]) {
   const { entry } = state.workspace;
   if (id === "website") return entry.website.url ?? entry.website.status.replace("_", " ");
   if (id === "goal_detail") return describeGoal(entry);
-  if (id === "quick_win_offer") return `${state.ploys.find((p) => p.spec?.source === "quick_win")?.spec?.name ?? "one"} is running`;
   for (const { doc, section } of contextItems[id].sections) {
     const d = docs.find((x) => x.slug === doc);
     const text = d && d.sections[section]?.status !== "empty" && readSection(d.content_md, getProfileSection(doc, section).heading);
@@ -82,15 +80,15 @@ type Group = "settled" | "sharpen" | "site" | "open" | "wait";
  * Where each item stands for the planner. Known items that no card has asked
  * yet (they came up in passing, or from their site) may be sharpened once; an
  * item a card has asked and they answered, or said they weren't sure about, is
- * settled. A card they didn't answer (they took the quick win beside it, or
- * said something else) leaves its item open.
+ * settled. A card they didn't answer (they said something else) leaves its
+ * item open.
  */
 function groupOf(id: ContextItemId, state: TrailState, asked: ReadonlySet<ContextItemId>): Group {
   const status = itemStatus(id, state);
   if (status === "known") return asked.has(id) || !SHARPENABLE.has(id) ? "settled" : "sharpen";
   if (status === "answered") return "settled";
   if (status === "inferred") return "site";
-  if (status === "reading" || status === "waiting") return "wait";
+  if (status === "reading") return "wait";
   return "open";
 }
 
@@ -100,14 +98,13 @@ const ESSENTIALS: ContextItemId[] = ["business_model", "target_customer", "goal_
 /**
  * The items the next card may ask about; the planner's schema only offers
  * these. Essentials come first: while one is still unknown and askable, only
- * essentials (and a quick win beside them) are offered, so a quick-win pick or
- * an aside can't lead the trail past their goal.
+ * essentials are offered, so an aside can't lead the trail past their goal.
  */
 export function askableItems(state: TrailState, messages: UIMessage[]): ContextItemId[] {
   const asked = askedOnCards(messages);
   const items = trailItems.filter((id) => id !== "website" && ["sharpen", "site", "open"].includes(groupOf(id, state, asked)));
   const missing = items.filter((id) => ESSENTIALS.includes(id) && groupOf(id, state, asked) === "open");
-  return missing.length ? items.filter((id) => missing.includes(id) || id === "quick_win_offer") : items;
+  return missing.length ? missing : items;
 }
 
 /** What we know and don't, as the planner sees it. */
@@ -119,8 +116,7 @@ function describeItems(state: TrailState, docs: Doc[], asked: ReadonlySet<Contex
     if (group === "settled") groups.settled.push(`- ${id}: ${status === "known" ? recorded(id, state, docs) : "they weren't sure or skipped; that's their answer"}`);
     else if (group === "sharpen") groups.sharpen.push(`${askable(id, state)}\n  Known so far: ${recorded(id, state, docs)}`);
     else if (group === "site") groups.site.push(`${askable(id, state)}\n  Their site says: ${recorded(id, state, docs)}`);
-    else if (group === "wait")
-      groups.wait.push(`- ${id}: ${status === "reading" ? "their site is still being read and will say it" : "no first win would be specific to them yet"}`);
+    else if (group === "wait") groups.wait.push(`- ${id}: their site is still being read and will say it`);
     else groups.open.push(askable(id, state));
   }
   const list = (lines: string[]) => lines.join("\n") || "- (none)";
@@ -152,18 +148,20 @@ function essentials(state: TrailState) {
 /** Profile items worth sharpening when they arrived in passing (broad answers limit what Ploy can make). */
 const SHARPENABLE = new Set<ContextItemId>(["target_customer", "business_model", "current_acquisition", "constraints"]);
 
-/** Their first deliverable: running, or what starts it. It's only as specific as what we know. */
+/**
+ * Their first deliverable: running, or what starts it. It comes from the
+ * questions (there's no separate offer to pick), and it's only as specific as
+ * what we know.
+ */
 function describeQuickWin(state: TrailState) {
   const running = state.ploys.find((p) => p.spec?.source === "quick_win");
-  if (running) return `Running: ${running.spec?.name}. Don't offer another.`;
-  const ready = quickWinChips(state);
-  const offer = ready.length ? `Ready to offer beside a card (quick_win_offer): ${ready.map((c) => c.label).join("; ")}.` : "None is ready to offer yet.";
+  if (running) return `Building: ${running.spec?.name}.`;
   const recipe = defaultQuickWin(state.workspace.entry);
-  if (!recipe) return `Not started. ${offer} One starts on its own once their goal is known and it has what it needs.`;
+  if (!recipe) return "Not started. It's chosen from their goal once that's known, and starts once it has what it needs.";
   const name = `"${quickWins[recipe].spec.name}"`;
   const needs = quickWinNeeds(recipe, state);
-  if (!needs.length) return `Not started. ${offer} ${name} starts on its own when they answer the next card (the card says so).`;
-  return `Not started. ${offer} ${name} starts on its own once ${needs.join(" and ")} ${needs.length > 1 ? "are" : "is"} known.`;
+  if (!needs.length) return `Not started. ${name} starts when they answer the next card (the card says so).`;
+  return `Not started. ${name} starts once ${needs.join(" and ")} ${needs.length > 1 ? "are" : "is"} known (the card that asks says so).`;
 }
 
 function describeSite(state: TrailState) {
@@ -269,7 +267,7 @@ ${describeProfile(docs)}
 ## Their site
 ${describeSite(state)}
 
-## Their first deliverable (quick win)
+## Their first deliverable
 ${describeQuickWin(state)}
 
 ## Essentials
@@ -290,7 +288,6 @@ ${capabilities()}
   - question: one plain sentence, 15 words or fewer, ending in "?", specific to their business and goal. No lead-in.
   - hint: what answering changes for them, 8 words or fewer, or null.
   - chips: for items with Options, 2-4 of them written "<option number>. <label>", copied exactly. Otherwise 2-3 short answers (1-4 words) specific to this business, in their voice. "Not sure yet" is added for you.
-  - alt: while a first win is ready to offer (see Their first deliverable) and none is running, offer it beside the card: a short question, hint null, chips [] (the options are shown). Otherwise null.
 
 # How to decide
 1. Enough to act on means the three essentials: what they sell, who to reach for their goal, and the goal itself. "They're not sure" counts as an answer: don't push on it.

@@ -203,7 +203,7 @@ describe("onboarding turn, when things fail", () => {
       message: "That didn't save on our side.",
       understood: "A business with a website.",
       gap: "goal_detail: what they want to grow",
-      next: { item: "goal_detail", question: "What do you most want to grow?", hint: null, chips: [], alt: null },
+      next: { item: "goal_detail", question: "What do you most want to grow?", hint: null, chips: [] },
     });
     fake.planner = model;
     const turn = await run([goalCard, typed("we want more demo requests")]);
@@ -300,7 +300,7 @@ describe("onboarding turn, when things fail", () => {
       message: "",
       understood: "Acme sells roasted coffee to cafés.",
       gap: "goal_detail: what they want to grow",
-      next: { item: "goal_detail", question: "What do you most want to grow?", hint: null, chips: [], alt: null },
+      next: { item: "goal_detail", question: "What do you most want to grow?", hint: null, chips: [] },
     });
     fake.planner = model;
     const website = card({ slot: "website", question: "What's your website?" });
@@ -323,7 +323,7 @@ describe("onboarding turn, when things fail", () => {
       message: "",
       understood: "A business with a site.",
       gap: "business_model: what they sell",
-      next: { item: "goal_detail", question: "What do you most want to grow?", hint: null, chips: [], alt: null },
+      next: { item: "goal_detail", question: "What do you most want to grow?", hint: null, chips: [] },
     });
     fake.planner = model;
     const turn = await run([card({ slot: "website", question: "What's your website?" }), typed("acme.com")], { sideEffects: true });
@@ -347,7 +347,7 @@ describe("onboarding turn, when things fail", () => {
       message: "Nice to meet you.",
       understood: "Culture Amp sells employee survey software; outreach to HR leaders at mid-size companies.",
       gap: "current_acquisition: how they reach HR leaders today",
-      next: { item: "current_acquisition", question: "How do you reach HR leaders today?", hint: null, chips: ["Conferences", "LinkedIn"], alt: null },
+      next: { item: "current_acquisition", question: "How do you reach HR leaders today?", hint: null, chips: ["Conferences", "LinkedIn"] },
     });
     fake.planner = model;
     const website = card({ slot: "website", question: "What's your website?" });

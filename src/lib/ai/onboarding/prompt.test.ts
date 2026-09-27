@@ -25,7 +25,7 @@ const cardFor = (slot: string): UIMessage => ({
 });
 
 describe("askableItems (what the next card may ask about)", () => {
-  it("offers only the essentials (and a quick win) while one is still unknown", () => {
+  it("offers only the essentials while one is still unknown", () => {
     const items = askableItems(state({ website: site }), [cardFor("quick_win_offer")]);
     expect(items).toContain("goal_detail");
     expect(items).not.toContain("current_acquisition");
@@ -53,7 +53,7 @@ describe("askableItems (what the next card may ask about)", () => {
 
   it("asks for a goal again when all they asked for is something Ploy doesn't do", () => {
     const hiring: Entry["goals"] = { status: "has", intents: [], inUserWords: "help hiring engineers", unmatched: "help hiring engineers" };
-    expect(askableItems(state({ website: { status: "none", url: null }, goals: hiring }, { docs: confirmedProfile("offering", "audience") }), [])).toEqual(["goal_detail", "quick_win_offer"]);
+    expect(askableItems(state({ website: { status: "none", url: null }, goals: hiring }, { docs: confirmedProfile("offering", "audience") }), [])).toEqual(["goal_detail"]);
   });
 
   it("treats 'not sure' as settled", () => {

@@ -308,7 +308,7 @@ export function SiteReadNode({
             value={draft}
             disabled={saving}
             onChange={(e) => setDraft(e.currentTarget.value)}
-            placeholder="What should I change? e.g. We mostly sell wholesale to cafés"
+            placeholder="What should I change?"
             aria-label="What to fix in your profile"
             className="w-full resize-none rounded-lg border border-border bg-canvas px-2.5 py-1.5 text-[12.5px] outline-none focus:border-ink/40"
           />

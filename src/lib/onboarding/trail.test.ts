@@ -43,7 +43,6 @@ const planned = (card: Partial<PlannedCard> & Pick<PlannedCard, "item">): Planne
   question: "Who do you most want to reach?",
   hint: null,
   chips: [],
-  alt: null,
   ...card,
 });
 
@@ -172,42 +171,16 @@ describe("toQuestion", () => {
     ]);
   });
 
-  it("offers the quick win beside another card, with catalog quick wins", () => {
-    const alt = { question: "Want something **useful** now?", hint: null, chips: ["1. Audit my homepage", "3. Find accounts"] };
-    const q = toQuestion(planned({ item: "goal_detail", alt }), state({ workspace: workspace({ website: site }), docs: confirmedProfile("audience") }));
-    // The side card's words are fixed: they always match its chips.
-    expect(q?.alt).toMatchObject({ slot: "quick_win_offer", question: "Want something useful built in the next few minutes?" });
-    expect(q?.alt?.chips.map((c) => c.value)).toEqual(["homepage_audit", "lookalike_accounts"]);
-  });
-
-  it("offers a landing page instead of a homepage audit without a site", () => {
-    const alt = { question: "Quick win?", hint: null, chips: [] };
-    const q = toQuestion(
-      planned({ item: "goal_detail", alt }),
-      state({ workspace: workspace({ website: { status: "none", url: null } }), docs: profileWith("offering") }),
-    );
-    expect(q?.alt?.chips[0].value).toBe("landing_page_draft");
-    expect(q?.alt?.chips.map((c) => c.value)).not.toContain("homepage_audit");
-  });
-
-  it("offers no quick win before one would be specific to them", () => {
-    const noSite = state({ workspace: workspace({ website: { status: "none", url: null } }) });
-    const alt = { question: "Quick win?", hint: null, chips: ["1. Draft a landing page"] };
-    const q = toQuestion(planned({ item: "business_model", question: "What do you sell?", alt }), noSite);
-    expect(q?.slot).toBe("business_model");
+  it("never offers a quick win to pick: the first deliverable comes from the questions", () => {
+    const s = state({ workspace: workspace({ website: site }), docs: confirmedProfile("audience") });
+    const q = toQuestion(planned({ item: "goal_detail" }), s);
     expect(q?.alt).toBeNull();
-    expect(toQuestion(planned({ item: "quick_win_offer" }), noSite)).toBeNull();
-  });
-
-  it("never offers a second quick win", () => {
-    const s = state({ workspace: withSite, ploys: [quickWin] });
-    const alt = { question: "Quick win?", hint: null, chips: [] };
-    expect(toQuestion(planned({ item: "target_customer", alt }), s)?.alt).toBeNull();
     expect(toQuestion(planned({ item: "quick_win_offer" }), s)).toBeNull();
   });
 
   it("finishes rather than ask something code can't serve", () => {
     expect(toQuestion(planned({ item: "tool" }), state({}))).toBeNull();
+    expect(toQuestion(planned({ item: "quick_win_offer" }), state({ workspace: withSite }))).toBeNull();
     expect(toQuestion(planned({ item: "website" }), state({ workspace: withSite }))).toBeNull();
   });
 });
@@ -254,14 +227,12 @@ describe("quick win readiness", () => {
 
   it("offers nothing with no site and nothing known about them", () => {
     expect(values(state({ workspace: noSite }))).toEqual([]);
-    expect(itemStatus("quick_win_offer", state({ workspace: noSite }))).toBe("waiting");
     expect(quickWinNeeds("landing_page_draft", state({ workspace: noSite }))).toEqual(["business_model"]);
   });
 
   it("offers what's ready once they've said what they sell", () => {
     const s = state({ workspace: noSite, docs: profileWith("offering") });
     expect(values(s)).toEqual(["landing_page_draft", "social_posts"]);
-    expect(itemStatus("quick_win_offer", s)).toBe("missing");
   });
 
   it("needs who they want to reach from them, not their site, for audience-based ones", () => {
@@ -283,10 +254,9 @@ describe("fallbackCard (the planner failed)", () => {
     expect(fallbackCard(state({ workspace: noSite }))).toMatchObject({ slot: "business_model", chips: [] });
   });
 
-  it("then their goal, with ready quick wins beside it", () => {
-    const q = fallbackCard(state({ workspace: noSite, docs: profileWith("offering") }));
-    expect(q?.slot).toBe("goal_detail");
-    expect(q?.alt?.chips.map((c) => c.value)).toEqual(["landing_page_draft", "social_posts"]);
+  it("then their goal, on its own", () => {
+    const q = fallbackCard(state({ workspace: workspace({ website: { status: "none", url: null } }), docs: profileWith("offering") }));
+    expect(q).toMatchObject({ slot: "goal_detail", question: "What do you most want to grow in the next few months?", alt: null });
   });
 
   it("then who they want to reach, asked for their goal", () => {

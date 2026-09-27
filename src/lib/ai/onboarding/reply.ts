@@ -35,10 +35,6 @@ export const turnSchema = z.object({
     .object({
       item: z.enum(contextItemIds).describe("The registry item this card asks about"),
       ...card,
-      alt: z
-        .object(card)
-        .nullable()
-        .describe("A quick-win card offered alongside (chips from the quick win options), or null"),
     })
     .nullable()
     .describe("The next card, or null to finish the trail"),
@@ -53,7 +49,6 @@ export const turnSchemaFor = (items: readonly ContextItemId[]) =>
           .object({
             item: z.enum(items as [ContextItemId, ...ContextItemId[]]).describe("The registry item this card asks about"),
             ...card,
-            alt: z.object(card).nullable().describe("A quick-win card offered alongside (chips from the quick win options), or null"),
           })
           .nullable()
           .describe("The next card, or null to finish the trail")
