@@ -25,10 +25,13 @@ export function QuestionCard({
   disabled,
   onAnswer,
   onCancel,
+  unlocks,
   width = "w-[300px]",
 }: {
   card: Card;
   slot: AnsweredSlot;
+  /** The first deliverable answering this starts (e.g. "a 3-step outreach sequence"), said before they answer. */
+  unlocks?: string | null;
   /** A line from Ploy before the question (a greeting, or a reply to what they said). */
   lead?: string | null;
   disabled: boolean;
@@ -61,6 +64,14 @@ export function QuestionCard({
       {lead && <p className="mb-1.5 text-[13px] leading-snug text-muted">{lead}</p>}
       <p className="text-[14.5px] leading-snug font-medium text-ink">{card.question}</p>
       {card.hint && <p className="mt-1 text-[12px] leading-snug text-muted">{card.hint}</p>}
+      {unlocks && (
+        <p className="mt-2 flex gap-1.5 rounded-lg bg-accent-soft px-2.5 py-2 text-[12px] leading-snug text-accent">
+          <Zap size={13} className="mt-px shrink-0" aria-hidden />
+          <span>
+            This will give me enough information to build {unlocks}. I&apos;ll kick that off in a new ploy with your answer.
+          </span>
+        </p>
+      )}
       {card.chips.length > 0 && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           {card.chips.map((chip) => (
@@ -128,13 +139,16 @@ export function ForkCards({
           <Zap size={12} /> Quick win · ready in minutes
         </span>
         <QuestionCard card={alt} slot={alt.slot} disabled={disabled} onAnswer={onAnswer} width="w-[280px]" />
+        {question.unlocks && (
+          <span className="max-w-[260px] text-center text-[11.5px] leading-snug text-muted">Or answer the other card, and I&apos;ll build {question.unlocks}.</span>
+        )}
       </div>
       <span className="self-center bg-background px-1 text-[12px] text-subtle">or</span>
       <div className="flex flex-col items-center gap-1.5">
         <span className="flex items-center gap-1 text-[12px] text-muted">
           <MapIcon size={12} /> {question.slot === "goal_detail" ? "Bigger goal" : contextItems[question.slot].label} · fills your map
         </span>
-        <QuestionCard card={question} slot={question.slot} disabled={disabled} onAnswer={onAnswer} width="w-[280px]" />
+        <QuestionCard card={question} slot={question.slot} unlocks={question.unlocks} disabled={disabled} onAnswer={onAnswer} width="w-[280px]" />
       </div>
     </div>
   );

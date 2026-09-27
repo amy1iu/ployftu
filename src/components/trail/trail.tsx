@@ -238,6 +238,7 @@ export function Trail({
                         card={row.question}
                         slot={row.question.slot}
                         lead={row.lead}
+                        unlocks={row.question.unlocks}
                         disabled={busy}
                         onAnswer={onAnswer}
                       />

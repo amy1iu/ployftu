@@ -1,4 +1,5 @@
 import { createUIMessageStream, Output, streamText } from "ai";
+import { quickWins } from "@/lib/catalog/quick-wins";
 import { logEvent } from "@/lib/db/events";
 import type { Workspace } from "@/lib/db/types";
 import { getDocs, getIntegrations, getMapNodes, getPloys, getWorkspace } from "@/lib/db/workspaces";
@@ -16,6 +17,7 @@ import {
   questionFor,
   quickWinReady,
   toQuestion,
+  upcomingQuickWin,
   type TrailMetadata,
   type TrailState,
 } from "@/lib/onboarding/trail";
@@ -174,7 +176,12 @@ export async function onboardingTurn({
         console.warn(`Planner card dropped: ${turn.next.item}`);
         await logEvent(workspaceId, "planner_card_dropped", { item: turn.next.item });
       }
-      if (question) writer.write({ type: "data-question", data: { ...question, offScript: !!said?.offScript } });
+      if (question) {
+        // Say up front when this answer will start their first deliverable.
+        const upcoming = upcomingQuickWin(question.slot, state);
+        const unlocks = upcoming ? quickWins[upcoming].builds : null;
+        writer.write({ type: "data-question", data: { ...question, unlocks, offScript: !!said?.offScript } });
+      }
       writer.write({ type: "finish" });
     },
     onEnd: async ({ messages }) => {

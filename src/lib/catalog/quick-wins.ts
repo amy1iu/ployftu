@@ -7,6 +7,7 @@ import type { PloybookSpec } from "./ploybooks";
 export const quickWins = {
   homepage_audit: {
     label: "Audit my homepage",
+    builds: "a homepage messaging audit",
     needsWebsite: true,
     pickWhen: "They have a website, and either have no clear goal or want more conversions.",
     spec: {
@@ -35,6 +36,7 @@ export const quickWins = {
   },
   outreach_sequence: {
     label: "Write a cold email sequence",
+    builds: "a 3-step outreach sequence",
     needsWebsite: false,
     pickWhen: "They want outbound, pipeline, or follow-up help.",
     spec: {
@@ -61,6 +63,7 @@ export const quickWins = {
   },
   lookalike_accounts: {
     label: "Find accounts like my best customers",
+    builds: "a list of 10 look-alike accounts",
     needsWebsite: false,
     pickWhen: "They want more leads and can describe who their best customers are.",
     spec: {
@@ -87,6 +90,7 @@ export const quickWins = {
   },
   social_posts: {
     label: "Draft 3 LinkedIn posts",
+    builds: "3 LinkedIn posts",
     needsWebsite: false,
     pickWhen: "They want brand awareness, content, or social presence.",
     spec: {
@@ -109,6 +113,7 @@ export const quickWins = {
   },
   landing_page_draft: {
     label: "Draft a landing page",
+    builds: "a landing page draft",
     needsWebsite: false,
     pickWhen: "They don't have a website yet, or want a page for a specific offer or ad campaign.",
     spec: {
@@ -139,6 +144,8 @@ export const quickWins = {
   {
     /** How the user picks it on the trail, e.g. "Audit my homepage". */
     label: string;
+    /** What Ploy builds, for a sentence: "…enough to build a homepage messaging audit". */
+    builds: string;
     needsWebsite: boolean;
     pickWhen: string;
     spec: PloybookSpec;

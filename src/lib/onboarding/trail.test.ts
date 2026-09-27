@@ -15,6 +15,7 @@ import {
   quickWinNeeds,
   toQuestion,
   trailItems,
+  upcomingQuickWin,
   websiteQuestion,
   withoutFailedTurn,
   type AnsweredSlot,
@@ -300,5 +301,23 @@ describe("withoutFailedTurn", () => {
     const messages = [msg("card", "assistant"), msg("tap", "user"), msg("partial", "assistant")];
     expect(withoutFailedTurn(messages).map((m) => m.id)).toEqual(["card"]);
     expect(withoutFailedTurn([msg("card", "assistant")]).map((m) => m.id)).toEqual(["card"]);
+  });
+});
+
+describe("upcomingQuickWin (said on the card that starts it)", () => {
+  it("names the path's deliverable on the one card it's still waiting on", () => {
+    const s = state({ workspace: workspace({ website: site, goals: outbound }) });
+    expect(upcomingQuickWin("target_customer", s)).toBe("outreach_sequence");
+    expect(upcomingQuickWin("current_acquisition", s)).toBeNull();
+  });
+
+  it("names the landing page on 'what do you sell' for someone with no site", () => {
+    const unsureNoSite = workspace({ website: { status: "none", url: null }, goals: { status: "unsure", intents: [], inUserWords: null, unmatched: null } });
+    expect(upcomingQuickWin("business_model", state({ workspace: unsureNoSite }))).toBe("landing_page_draft");
+  });
+
+  it("says nothing once one is running, or before the goal picks one", () => {
+    expect(upcomingQuickWin("target_customer", state({ workspace: workspace({ website: site, goals: outbound }), ploys: [quickWin] }))).toBeNull();
+    expect(upcomingQuickWin("goal_detail", state({ workspace: workspace({ website: site }) }))).toBeNull();
   });
 });

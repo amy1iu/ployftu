@@ -6,6 +6,7 @@ import { quickWins, type QuickWinId } from "@/lib/catalog/quick-wins";
 import type { Doc, Integration, MapNode, Ploy, Workspace } from "@/lib/db/types";
 import { cleanQuestion } from "@/lib/ai/onboarding/sentences";
 import { hasContext } from "@/lib/docs/profile";
+import { defaultQuickWin } from "./entry";
 
 // Getting Started is a trail of small questions, each answerable in under a
 // minute. The chat model plans it: each turn it picks the context item (see
@@ -37,6 +38,8 @@ export type QuestionData = Card & {
   alt: (Card & { slot: "quick_win_offer" }) | null;
   /** The message before it replies to something off-script. */
   offScript: boolean;
+  /** The first deliverable this card's answer starts (what it builds), so it's said up front. */
+  unlocks?: string | null;
 };
 
 /** Written when an answer lands: what it means, for the answered pill (the `data-answered` part). */
@@ -107,6 +110,19 @@ export function quickWinNeeds(id: QuickWinId, { workspace, docs }: Pick<TrailSta
 }
 
 export const quickWinReady = (id: QuickWinId, state: Pick<TrailState, "workspace" | "docs">) => !quickWinNeeds(id, state).length;
+
+/**
+ * The first deliverable that answering this card starts: the path's default,
+ * when this card's item is the one thing it's still waiting on (and nothing is
+ * running yet). Said on the card, so it never starts as a surprise.
+ */
+export function upcomingQuickWin(slot: ContextItemId, state: TrailState): QuickWinId | null {
+  if (contextItems.quick_win_offer.known(state)) return null;
+  const recipe = defaultQuickWin(state.workspace.entry);
+  if (!recipe) return null;
+  const needs = quickWinNeeds(recipe, state);
+  return needs.length === 1 && needs[0] === slot ? recipe : null;
+}
 
 /**
  * Up to three quick wins that are ready now: a homepage audit when they have a

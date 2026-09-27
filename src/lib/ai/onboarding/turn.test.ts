@@ -171,6 +171,8 @@ describe("onboarding turn, when things fail", () => {
     // Without the planner, the next open item in the usual order: who they want to reach.
     expect(turn.question?.slot).toBe("target_customer");
     expect(turn.question?.question).toBe("Who are your best customers today?");
+    // Answering it starts their first deliverable, so the card says so.
+    expect(turn.question?.unlocks).toBe("a list of 10 look-alike accounts");
     expect(plannerErrors()).toHaveLength(1);
   });
 
