@@ -3,8 +3,6 @@
 import { ArrowUp } from "lucide-react";
 import { useState, useTransition } from "react";
 import { updateOnboardingStatus } from "@/app/actions";
-import { integrationCategories, type IntegrationCategory } from "@/lib/catalog/integrations";
-import { nodeState } from "@/lib/map/state";
 import { useWorkspace } from "../workspace/workspace-provider";
 
 /** How Ploy works, in three steps: the mental model to leave them with. */
@@ -15,21 +13,13 @@ const howItWorks = [
 ];
 
 /**
- * The end of the trail: how Ploy works from here, what's next on the map, what
- * connecting tools would unlock, a button to finish onboarding, and a box to
- * keep chatting.
+ * The end of the trail: how Ploy works from here, a button to finish
+ * onboarding, and a box to keep chatting.
  */
 export function EndNode({ disabled, onAsk }: { disabled: boolean; onAsk: (text: string) => void }) {
-  const { workspace, ploys, integrations, mapNodes, docs } = useWorkspace();
+  const { workspace } = useWorkspace();
   const [finishing, startTransition] = useTransition();
   const [draft, setDraft] = useState("");
-
-  const states = mapNodes.map((node) => ({ node, ...nodeState(node, { ploys, integrations, mapNodes, docs }) }));
-  const done = states.filter((s) => s.state === "done" || s.state === "live").length;
-  const ready = states.filter((s) => s.state === "available");
-  const needs = [...new Set(states.flatMap((s) => s.missing))] as IntegrationCategory[];
-  // Name the tool they said they use, if they did.
-  const connect = needs.map((c) => workspace.entry.tools?.[c] ?? integrationCategories[c].need);
 
   return (
     <div className="w-[300px] animate-[level-pop_400ms_ease-out] space-y-2.5 rounded-2xl border border-ink/25 bg-white p-3.5 text-[13px]">
@@ -42,16 +32,6 @@ export function EndNode({ disabled, onAsk }: { disabled: boolean; onAsk: (text: 
           </li>
         ))}
       </ol>
-      <p className="leading-snug text-muted">
-        {ready.length} task{ready.length === 1 ? "" : "s"} ready, {done} done.
-        {ready.length > 0 && (
-          <>
-            {" "}
-            Next up: <span className="text-ink">{ready[0].node.title}</span>.
-          </>
-        )}
-        {connect.length > 0 && ` Connect ${new Intl.ListFormat("en", { type: "conjunction" }).format(connect)} to unlock more.`}
-      </p>
       {workspace.onboarding_status === "active" && (
         <button
           type="button"
