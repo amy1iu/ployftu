@@ -111,16 +111,22 @@ export const quickWinReady = (id: QuickWinId, state: Pick<TrailState, "workspace
 
 /**
  * The first deliverable that answering this card starts: the path's default,
- * when this card's item is the one thing it's still waiting on (and nothing is
- * running yet). Said on the card, so it never starts as a surprise.
+ * when this card's item is the one thing it's still waiting on, or when it
+ * has everything but is held back for one more answer (and nothing is running
+ * yet). Said on the card, so it never starts as a surprise.
  */
 export function upcomingQuickWin(slot: ContextItemId, state: TrailState): QuickWinId | null {
   if (contextItems.quick_win_offer.known(state)) return null;
   const recipe = defaultQuickWin(state.workspace.entry);
   if (!recipe) return null;
   const needs = quickWinNeeds(recipe, state);
+  // Held back only for want of one more answer: whichever card is next starts it.
+  if (!needs.length) return state.answered.size + 1 >= MIN_ANSWERS_BEFORE_WIN ? recipe : null;
   return needs.length === 1 && needs[0] === slot ? recipe : null;
 }
+
+/** Answers before the goal path starts a first deliverable on its own: never on the first one. */
+export const MIN_ANSWERS_BEFORE_WIN = 2;
 
 /**
  * Up to three quick wins that are ready now: a homepage audit when they have a
@@ -242,6 +248,12 @@ function openChips(id: ContextItemId, labels: string[]): Chip[] {
  * to finish. A pick code can't serve (the website again, a second quick win,
  * a tool when none is needed) finishes too; the eval counts how often.
  */
+/** The words on cards whose answers are catalog options: they always match their chips. */
+const optionCardWords = {
+  goal_detail: { question: "What do you most want to grow in the next few months?", hint: "Decides which tasks fill your map." },
+  quick_win_offer: { question: "Want something useful built in the next few minutes?", hint: "Pick one and I'll start right away." },
+};
+
 export function toQuestion(planned: PlannedCard | null, state: TrailState): QuestionData | null {
   if (!planned || planned.item === "website" || !trailItems.includes(planned.item)) return null;
   const { item } = planned;
@@ -258,17 +270,14 @@ export function toQuestion(planned: PlannedCard | null, state: TrailState): Ques
   if (item === "quick_win_offer" && !ready.length) return null;
   const alt =
     planned.alt && item !== "quick_win_offer" && !quickWinRunning && ready.length
-      ? {
-          slot: "quick_win_offer" as const,
-          question: cleanQuestion(planned.alt.question) || "Want something useful in the next few minutes?",
-          hint: planned.alt.hint ?? "Pick one and I'll start right away.",
-          chips: pickChips(ready, planned.alt.chips),
-        }
+      ? { slot: "quick_win_offer" as const, ...optionCardWords.quick_win_offer, chips: pickChips(ready, planned.alt.chips) }
       : null;
+  // Cards whose answers are catalog options say what the options answer; the model's words could drift from them.
+  const fixed = item === "goal_detail" || item === "quick_win_offer" ? optionCardWords[item] : null;
   return {
     slot: item,
-    question: cleanQuestion(planned.question) || "What should I know next?",
-    hint: planned.hint,
+    question: fixed?.question ?? (cleanQuestion(planned.question) || "What should I know next?"),
+    hint: fixed ? fixed.hint : planned.hint,
     chips,
     category: null,
     alt,

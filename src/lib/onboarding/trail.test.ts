@@ -155,6 +155,11 @@ describe("toQuestion", () => {
     expect(toQuestion(planned({ item: "business_model", question: "What do you sell?", chips: guesses }), state({ workspace: noSite }))?.chips).toEqual([]);
   });
 
+  it("words the goal card itself, whatever the model wrote", () => {
+    const q = toQuestion(planned({ item: "goal_detail", question: "What is your revenue model?", hint: "Pricing detail" }), state({ workspace: workspace({ website: site }) }));
+    expect(q).toMatchObject({ question: "What do you most want to grow in the next few months?", hint: "Decides which tasks fill your map." });
+  });
+
   it("keeps goal chip values from the catalog, and 'not sure'", () => {
     const s = state({ workspace: workspace({ website: site }) });
     const unmatched = toQuestion(planned({ item: "goal_detail", chips: ["2. More demo bookings", "made up"] }), s);
@@ -170,7 +175,8 @@ describe("toQuestion", () => {
   it("offers the quick win beside another card, with catalog quick wins", () => {
     const alt = { question: "Want something **useful** now?", hint: null, chips: ["1. Audit my homepage", "3. Find accounts"] };
     const q = toQuestion(planned({ item: "goal_detail", alt }), state({ workspace: workspace({ website: site }), docs: confirmedProfile("audience") }));
-    expect(q?.alt).toMatchObject({ slot: "quick_win_offer", question: "Want something useful now?" });
+    // The side card's words are fixed: they always match its chips.
+    expect(q?.alt).toMatchObject({ slot: "quick_win_offer", question: "Want something useful built in the next few minutes?" });
     expect(q?.alt?.chips.map((c) => c.value)).toEqual(["homepage_audit", "lookalike_accounts"]);
   });
 

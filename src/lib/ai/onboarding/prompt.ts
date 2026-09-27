@@ -1,9 +1,10 @@
 import type { UIMessage } from "ai";
-import { catalogForPrompt, getIntent, quickWins } from "@/lib/catalog";
+import { getIntent, quickWins } from "@/lib/catalog";
+import { regions } from "@/lib/catalog/regions";
 import { contextItems, type ContextItemId } from "@/lib/catalog/context";
 import type { Doc } from "@/lib/db/types";
 import { readSection } from "@/lib/docs/markdown";
-import { getProfileSection } from "@/lib/docs/profile";
+import { getProfileSection, type ProfileDocSlug } from "@/lib/docs/profile";
 import { defaultQuickWin, topIntent, type Entry } from "@/lib/onboarding/entry";
 import {
   chipOptions,
@@ -13,29 +14,10 @@ import {
   trailItems,
   MAX_ANSWERED,
   type AnsweredData,
-  type ItemStatus,
   type QuestionData,
   type TrailState,
 } from "@/lib/onboarding/trail";
 import { textOf } from "./text";
-
-function describeEntry(entry: Entry) {
-  const site = {
-    unknown: "not answered yet",
-    has: `yes: ${entry.website.url}`,
-    none: "no website",
-    not_live: "website not live yet",
-    unreadable: `gave ${entry.website.url}, but it couldn't be read`,
-  }[entry.website.status];
-  const goals = {
-    unknown: "not answered yet",
-    unsure: "not sure yet",
-    has: `${entry.goals.intents.map((i) => getIntent(i.id).label).join(", ")}${
-      entry.goals.inUserWords ? ` ("${entry.goals.inUserWords}")` : ""
-    }`,
-  }[entry.goals.status];
-  return `- Website: ${site}\n- Goals: ${goals}${entry.goals.unmatched ? `\n- Asked for something Ploy doesn't cover: "${entry.goals.unmatched}"` : ""}`;
-}
 
 /** What the user's latest message did, for the reply to respond to. */
 export type Said = {
@@ -46,24 +28,26 @@ export type Said = {
   problems: string[];
 };
 
+/** Whether this turn has something to say before the card; otherwise the message stays empty (code drops any). */
+export const hasReply = (said: Said | null) => !!said && (!said.open || !said.answered || !!said.offScript);
+
 function messageRule(said: Said | null) {
   if (said && !said.open)
     return "They've finished the setup questions and are chatting freely. Answer what they said in under 70 words, statements only.";
   if (said?.offScript)
-    return `They said something the question isn't about: "${said.offScript}". Reply to it in 1-2 sentences, statements only.${said.answered ? " They also answered the question; don't mention that." : ""}`;
+    return `They said something the card isn't about: "${said.offScript}". Reply to it in 1-2 sentences, statements only.${said.answered ? " They also answered the card; don't mention that." : ""}`;
   if (said && !said.answered)
     return said.problems.length
       ? `Their answer couldn't be recorded: ${said.problems.join(" ")} Say so in one short sentence, statements only.`
-      : "Their latest message didn't answer the question. Respond to what they said in one short, friendly sentence, statements only.";
-  // The trail ends on the You're set up card, which says what happens now; no wrap-up message.
-  return 'Leave it empty ("").';
+      : "Their latest message didn't answer the card. Respond to what they said in one short, friendly sentence, statements only.";
+  return '"" (empty: the card speaks for itself).';
 }
 
-/** What's recorded for an item, in a few words, for the "done" list. */
+/** A known item's value, in a few words. */
 function recorded(id: ContextItemId, state: TrailState, docs: Doc[]) {
   const { entry } = state.workspace;
   if (id === "website") return entry.website.url ?? entry.website.status.replace("_", " ");
-  if (id === "goal_detail") return describeEntry(entry).split("\n")[1].replace("- Goals: ", "");
+  if (id === "goal_detail") return describeGoal(entry);
   if (id === "quick_win_offer") return `${state.ploys.find((p) => p.spec?.source === "quick_win")?.spec?.name ?? "one"} is running`;
   for (const { doc, section } of contextItems[id].sections) {
     const d = docs.find((x) => x.slug === doc);
@@ -73,85 +57,138 @@ function recorded(id: ContextItemId, state: TrailState, docs: Doc[]) {
   return "known";
 }
 
-const dontAsk: Partial<Record<ItemStatus, string>> = {
-  answered: "asked already; they weren't sure or skipped",
-  reading: "coming from their site, which is being read",
-  waiting: "no quick win would be specific to them yet; it's offered once they've said what it needs (see Their first deliverable)",
-};
+function describeGoal(entry: Entry) {
+  const { goals } = entry;
+  if (goals.status === "unsure") return "not sure yet";
+  if (goals.status !== "has") return "not answered yet";
+  const labels = goals.intents.map((i) => getIntent(i.id).label).join(", ");
+  return `${labels}${goals.inUserWords ? ` (in their words: "${goals.inUserWords}")` : ""}${goals.unmatched ? `; also asked for something Ploy doesn't do: "${goals.unmatched}"` : ""}`;
+}
+
+/** Items a card may ask about, with what the card can offer. */
+function askable(id: ContextItemId, state: TrailState) {
+  const lines = [`- ${id} (${contextItems[id].label}): ${contextItems[id].why}`];
+  const intent = topIntent(state.workspace.entry);
+  if (id === "target_customer" && intent) lines.push(`  For their goal, e.g. "${getIntent(intent).audienceQuestion}"`);
+  if (id === "business_model") lines.push("  No chips: they type it.");
+  const options = chipOptions(id, state);
+  if (options?.length) lines.push(`  Options (chips come only from these): ${options.map((o, i) => `${i + 1}. ${o.label}`).join("; ")}`);
+  return lines.join("\n");
+}
+
+type Group = "settled" | "sharpen" | "site" | "open" | "wait";
 
 /**
- * The registry as the planner sees it, grouped by what it may do with each
- * item: done (never ask), don't ask, inferred (confirm at most), open (ask).
- * Grouping, rather than a status per item, is what keeps the model from
- * re-asking what's known.
+ * Where each item stands for the planner. Known items that no card has asked
+ * yet (they came up in passing, or from their site) may be sharpened once; an
+ * item a card has asked and they answered, or said they weren't sure about, is
+ * settled. A card they didn't answer (they took the quick win beside it, or
+ * said something else) leaves its item open.
  */
-function describeItems(state: TrailState, docs: Doc[], done: boolean) {
-  const ids = trailItems.map((id) => ({ id, status: itemStatus(id, state) }));
-  const list = (status: ItemStatus[], line: (id: ContextItemId, status: ItemStatus) => string) =>
-    ids.filter((i) => status.includes(i.status)).map((i) => line(i.id, i.status)).join("\n") || "- (none)";
-  const open = (id: ContextItemId) => {
-    const lines = [`- ${id} (${contextItems[id].label}): ${contextItems[id].why}`];
-    const intent = topIntent(state.workspace.entry);
-    if (id === "target_customer" && intent) lines.push(`  For their goal, e.g. "${getIntent(intent).audienceQuestion}"`);
-    const options = chipOptions(id, state);
-    if (options?.length)
-      lines.push(`  Options (the answers the card offers, so ask a question they answer): ${options.map((o, i) => `${i + 1}. ${o.label}`).join("; ")}`);
-    return lines.join("\n");
+function groupOf(id: ContextItemId, state: TrailState, asked: ReadonlySet<ContextItemId>): Group {
+  const status = itemStatus(id, state);
+  if (status === "known") return asked.has(id) || !SHARPENABLE.has(id) ? "settled" : "sharpen";
+  if (status === "answered") return "settled";
+  if (status === "inferred") return "site";
+  if (status === "reading" || status === "waiting") return "wait";
+  return "open";
+}
+
+/** What Ploy needs to act: what they sell, who to reach, and their goal. */
+const ESSENTIALS: ContextItemId[] = ["business_model", "target_customer", "goal_detail"];
+
+/**
+ * The items the next card may ask about; the planner's schema only offers
+ * these. Essentials come first: while one is still unknown and askable, only
+ * essentials (and a quick win beside them) are offered, so a quick-win pick or
+ * an aside can't lead the trail past their goal.
+ */
+export function askableItems(state: TrailState, messages: UIMessage[]): ContextItemId[] {
+  const asked = askedOnCards(messages);
+  const items = trailItems.filter((id) => id !== "website" && ["sharpen", "site", "open"].includes(groupOf(id, state, asked)));
+  const missing = items.filter((id) => ESSENTIALS.includes(id) && groupOf(id, state, asked) === "open");
+  return missing.length ? items.filter((id) => missing.includes(id) || id === "quick_win_offer") : items;
+}
+
+/** What we know and don't, as the planner sees it. */
+function describeItems(state: TrailState, docs: Doc[], asked: ReadonlySet<ContextItemId>) {
+  const groups: Record<Group, string[]> = { settled: [], sharpen: [], site: [], open: [], wait: [] };
+  for (const id of trailItems) {
+    const group = groupOf(id, state, asked);
+    const status = itemStatus(id, state);
+    if (group === "settled") groups.settled.push(`- ${id}: ${status === "known" ? recorded(id, state, docs) : "they weren't sure or skipped; that's their answer"}`);
+    else if (group === "sharpen") groups.sharpen.push(`${askable(id, state)}\n  Known so far: ${recorded(id, state, docs)}`);
+    else if (group === "site") groups.site.push(`${askable(id, state)}\n  Their site says: ${recorded(id, state, docs)}`);
+    else if (group === "wait")
+      groups.wait.push(`- ${id}: ${status === "reading" ? "their site is still being read and will say it" : "no first win would be specific to them yet"}`);
+    else groups.open.push(askable(id, state));
+  }
+  const list = (lines: string[]) => lines.join("\n") || "- (none)";
+  return `## Settled: can't be asked again
+${list(groups.settled)}
+
+## Known, but only in passing: may be sharpened once, if it's too broad to act on for their goal
+${list(groups.sharpen)}
+
+## From their site, not confirmed: confirm only if it matters for their goal
+${list(groups.site)}
+
+## Not known yet
+${list(groups.open)}
+
+## Not askable right now
+${list(groups.wait)}`;
+}
+
+/** The three things Ploy needs to act, and whether each is in hand. */
+function essentials(state: TrailState) {
+  const mark = (id: ContextItemId) => {
+    const status = itemStatus(id, state);
+    return status === "known" || status === "inferred" ? "yes" : status === "answered" ? "they're not sure" : "not yet";
   };
-  return `## Done: never ask about these again, not even to refine or confirm
-${list(["known"], (id) => `- ${id}: ${recorded(id, state, docs)}`)}
-
-## Don't ask
-${list(["answered", "reading", "waiting"], (id, status) => `- ${id}: ${dontAsk[status]}`)}
-
-## Inferred from their site: don't ask cold; confirm only if it matters for their goal
-${list(["inferred"], (id) => `${open(id)}\n  Their site says: ${recorded(id, state, docs)}`)}
-
-${done ? "## Not needed now: the trail is complete. Ask these only if they ask for more questions" : "## Open: the only items you may ask about"}
-${list(["missing"], open)}`;
+  return `What they sell: ${mark("business_model")}. Who to reach: ${mark("target_customer")}. Their goal: ${mark("goal_detail")}.`;
 }
 
-/** Whether the trail has what it needs: the goal and who it's for (either may be "not sure"), and a first deliverable running. */
-function readiness(state: TrailState) {
-  const settled = (id: ContextItemId) => ["known", "answered"].includes(itemStatus(id, state));
-  const missing = [
-    !settled("goal_detail") && "goal_detail",
-    !settled("target_customer") && "target_customer",
-    !contextItems.quick_win_offer.known(state) && "a running quick win",
-  ].filter(Boolean);
-  return missing.length
-    ? { done: false, text: `Not ready to finish. Still needed: ${missing.join(", ")}.` }
-    : { done: true, text: "READY TO FINISH: their goal and who they want to reach are in, and their first deliverable is running. Set next to null now." };
-}
+/** Profile items worth sharpening when they arrived in passing (broad answers limit what Ploy can make). */
+const SHARPENABLE = new Set<ContextItemId>(["target_customer", "business_model", "current_acquisition", "constraints"]);
 
-/**
- * Their first deliverable: running, or what starts on its own and what it's
- * waiting on. A deliverable is only as specific as what we know, so none
- * starts (or is offered) before it has what its recipe needs.
- */
+/** Their first deliverable: running, or what starts it. It's only as specific as what we know. */
 function describeQuickWin(state: TrailState) {
   const running = state.ploys.find((p) => p.spec?.source === "quick_win");
   if (running) return `Running: ${running.spec?.name}. Don't offer another.`;
   const ready = quickWinChips(state);
-  const offer = ready.length
-    ? `Ready to offer now: ${ready.map((c) => c.label).join("; ")}.`
-    : "None is ready to offer yet: each would be generic without more about them.";
+  const offer = ready.length ? `Ready to offer beside a card (quick_win_offer): ${ready.map((c) => c.label).join("; ")}.` : "None is ready to offer yet.";
   const recipe = defaultQuickWin(state.workspace.entry);
-  if (!recipe) return `Not started. ${offer} On the goal path one starts on its own once the goal is known.`;
-  const needs = quickWinNeeds(recipe, state);
+  if (!recipe) return `Not started. ${offer} One starts on its own once their goal is known and it has what it needs.`;
   const name = `"${quickWins[recipe].spec.name}"`;
-  if (!needs.length) return `Not started. ${offer} ${name} starts on its own now.`;
-  const fallback = needs.includes("target_customer") ? " (if they're not sure who, a ready one that doesn't need it starts instead)" : "";
-  return `Not started. ${offer} ${name} starts on its own once ${needs.join(" and ")} ${needs.length > 1 ? "are" : "is"} known${fallback}.`;
+  const needs = quickWinNeeds(recipe, state);
+  if (!needs.length) return `Not started. ${offer} ${name} starts on its own when they answer the next card (the card says so).`;
+  return `Not started. ${offer} ${name} starts on its own once ${needs.join(" and ")} ${needs.length > 1 ? "are" : "is"} known.`;
 }
 
 function describeSite(state: TrailState) {
-  const { crawl } = state.workspace;
-  if (!crawl) return "Not read (no site, or not read yet).";
-  if (crawl.status === "failed") return "Couldn't be read.";
-  if (crawl.status !== "done" || !crawl.summary) return "Being read right now; the profile fills in within a minute.";
+  const { crawl, entry } = state.workspace;
+  if (!crawl) return entry.website.status === "has" ? "Not read yet." : "They have no site to read.";
+  if (crawl.status === "failed") return "Couldn't be read: what they sell has to come from them.";
+  if (crawl.status !== "done" || !crawl.summary) return "Still being read.";
   const opportunities = crawl.opportunities.map((o) => `- ${o.title} (${getIntent(o.intent).label}): ${o.why}`).join("\n");
-  return `${crawl.summary.oneLiner}\nOpportunities we spotted:\n${opportunities || "- none"}`;
+  return `${crawl.summary.oneLiner}\nGaps we spotted on it:\n${opportunities || "- none"}`;
+}
+
+/** Their profile: only what's filled in, one line per section. */
+function describeProfile(docs: Doc[]) {
+  const lines = docs
+    .filter((d) => d.kind === "profile")
+    .flatMap((d) =>
+      Object.entries(d.sections)
+        .filter(([, meta]) => meta.status !== "empty")
+        .map(([key, meta]) => {
+          const text = readSection(d.content_md, getProfileSection(d.slug as ProfileDocSlug, key).heading)?.replace(/\s+/g, " ").slice(0, 200);
+          return text ? `- ${d.title} › ${getProfileSection(d.slug as ProfileDocSlug, key).heading}${meta.status === "inferred" ? " (from their site)" : ""}: ${text}` : null;
+        }),
+    )
+    .filter(Boolean);
+  return lines.join("\n") || "- (nothing yet)";
 }
 
 /** The trail so far: each card, what they said, and what it recorded. */
@@ -159,7 +196,7 @@ export function trailSoFar(messages: UIMessage[]) {
   const lines: string[] = [];
   for (const m of messages) {
     if (m.role === "user") {
-      lines.push(`They: "${textOf(m).slice(0, 200)}"`);
+      lines.push(`They: "${textOf(m).slice(0, 300)}"`);
       continue;
     }
     for (const p of m.parts) {
@@ -176,11 +213,31 @@ export function trailSoFar(messages: UIMessage[]) {
   return lines.join("\n");
 }
 
+/** Every item a card has asked about (the fork asks two). */
+export function askedOnCards(messages: UIMessage[]) {
+  const asked = new Set<ContextItemId>();
+  for (const m of messages)
+    for (const p of m.parts)
+      if (p.type === "data-question") {
+        const q = p.data as QuestionData;
+        asked.add(q.slot);
+        if (q.alt) asked.add(q.alt.slot);
+      }
+  return asked;
+}
+
+const capabilities = () =>
+  `Ploy covers: ${regions.map((r) => `${r.name} (${r.description.replace(/\.$/, "")})`).join("; ")}. First wins it can build in minutes: ${Object.values(quickWins)
+    .map((q) => q.spec.name)
+    .join(", ")}. It doesn't do hiring, fundraising, bookkeeping, legal, or building their product.`;
+
 /**
- * The Getting Started planner. Each turn the model sees what we want to
- * learn (the registry), what's known, and the trail so far, then replies to
- * what they said and picks the next card, or finishes. When code has already
- * decided the card (the website first, or the cap), it only writes the message.
+ * The Getting Started planner. The model gets an objective (know the business
+ * well enough to make their map and first deliverable specific), what's known
+ * and what isn't, and the trail so far; it writes down what it understood and
+ * the biggest gap, then picks the card that closes it, or finishes. Code only
+ * holds the website first and the cap. When code has already chosen the card,
+ * the model only writes the message.
  */
 export function buildTrailPrompt({
   state,
@@ -197,63 +254,56 @@ export function buildTrailPrompt({
   planning: boolean;
 }) {
   const left = MAX_ANSWERED - state.answered.size;
-  const ready = readiness(state);
-  const next = !planning
-    ? "null (the app puts up the next card itself)."
-    : ready.done
-      ? "null: the trail is complete (see Where the trail stands). A card only if their latest message asks for more questions."
-      : `the next card, or null to finish. At most ${left} more answer${left === 1 ? "" : "s"} fit on the trail.`;
+  const asked = askedOnCards(messages);
+  const cardsAnswered = state.answered.size;
 
-  return `You are Ploy's onboarding guide. Ploy is a marketing platform: it builds on-brand sites and content, and runs growth automations (Ploybooks) made of building blocks called primitives.
-The user is on Getting Started: a short trail of question cards, each answerable in under a minute by tapping a chip or typing. Each answer unlocks tasks on their growth map. You run the trail: each turn you reply to what they said (if needed) and choose the next card, or finish.
+  return `You are Ploy's onboarding guide. Ploy is a marketing platform that works like a teammate: it learns a business, then builds and runs its marketing (sites, content, outreach, ads, reporting).
+Getting Started is a short trail of question cards. Your job: get to know this business well enough that everything Ploy makes for them, starting with their first deliverable and their growth map, is specific to them rather than generic. Each turn you reply if they said something that needs it, then choose the next card, or finish.
+
+# What's known
+${describeItems(state, docs, asked)}
+
+## Their profile so far
+${describeProfile(docs)}
+
+## Their site
+${describeSite(state)}
+
+## Their first deliverable (quick win)
+${describeQuickWin(state)}
+
+## Essentials
+${essentials(state)}
+
+## The trail so far (${cardsAnswered} card${cardsAnswered === 1 ? "" : "s"} answered; at most ${Math.max(0, left)} more)
+${trailSoFar(messages) || "(nothing yet)"}
+
+## What Ploy can do
+${capabilities()}
 
 # What to write
 - message: ${messageRule(said)}
-- next: ${next}
-  - item: the item the card asks about (from Open, or Inferred to confirm).
-  - question: one plain sentence, 15 words or fewer, ending in "?", specific to their business. No lead-in pleasantries.
-  - hint: what answering unlocks for them, 8 words or fewer, or null.
-  - chips: items with Options: pick 2-4, written as "<option number>. <label>", copied exactly, in the order that fits them best. business_model with nothing known about their business: [] (they type it). Other items: always 2-3 short answers (1-4 words) specific to their business, like "Independent cafés"; never generic, never empty. "Not sure yet" is added for you.
-  - alt: a quick-win card offered beside this one (the fork: "a quick win now, or tell me your goal"). Only while quick_win_offer is Open; otherwise null. Keep it light: a short question, hint null, and chips [] to show quick_win_offer's Options as they are (or pick from them).
+- understood: one sentence: what this business sells, who it wants to reach, and what it wants to grow, as far as you know.
+- gap: ${planning ? "the one missing or too-broad thing that would most change their first deliverable or map, naming the item (e.g. \"target_customer: which HR roles\"), or \"none\" if another question wouldn't change what Ploy does first." : "\"none\" (the app puts up the next card itself)."}
+- next: ${planning ? "the card that closes the gap, or null to finish (only when gap is \"none\")." : "null."}
+  - item: what the card asks about (from Not known yet, Known only in passing, or From their site).
+  - question: one plain sentence, 15 words or fewer, ending in "?", specific to their business and goal. No lead-in.
+  - hint: what answering changes for them, 8 words or fewer, or null.
+  - chips: for items with Options, 2-4 of them written "<option number>. <label>", copied exactly. Otherwise 2-3 short answers (1-4 words) specific to this business, in their voice. "Not sure yet" is added for you.
+  - alt: while a first win is ready to offer (see Their first deliverable) and none is running, offer it beside the card: a short question, hint null, chips [] (the options are shown). Otherwise null.
 
-# How to plan
-1. Ask only about items listed under Open (or confirm an Inferred one). Never ask about anything under Done or Don't ask, even reworded, and even if the answer is vague or broad: don't refine it. If they already said it in the trail so far, even in passing, it's done.
-2. No readable site (none, not live, or couldn't be read): ask business_model first; everything Ploy makes needs it.
-3. Then goal_detail, with the quick win offered beside it as alt (the fork) when quick_win_offer is Open. If they pick the quick win, ask goal_detail next.
-4. Then target_customer, asked for their goal. Their first deliverable starts on its own once goal_detail and target_customer are in.
-5. current_acquisition and constraints only when they'd change what Ploy does first for them, and the trail isn't ready to finish.
-6. A first deliverable is only as good as what we know about them: one built on nothing is generic and wastes their first impression. So quick wins are only offered once one has what it needs (quick_win_offer is under Open only then), and the first one starts on its own once it does. When the trail is waiting on something for their deliverable (see Their first deliverable), ask for that next.
-7. Finish (next: null) as soon as it's READY TO FINISH, even with items left: they're optional. Also finish when they seem done, impatient, or want to get going. Short beats thorough: every card costs them time.
-8. One question per card, about one item.
+# How to decide
+1. Enough to act on means the three essentials: what they sell, who to reach for their goal, and the goal itself. "They're not sure" counts as an answer: don't push on it.
+2. Essentials come first; until they're in, only they can be asked. Beyond them, ask only what would change their first deliverable or map: sharpening a broad essential once (e.g. "mid-size companies" when outreach needs a role), how they reach customers today, or real constraints. A card that only confirms what's clear is wasted.
+3. With no site to read, what they sell comes first: everything Ploy makes needs it.
+4. Don't finish on their first answer, even one that covers everything: ask the one question that would most improve what Ploy makes first.
+5. Aim for 3 to 4 cards in all. Once the essentials are answered (or they're not sure), set gap to "none" and finish, unless one more card would clearly change what Ploy makes first. Finish right away if they seem done or impatient.
+6. Settled items can't be asked again. One question per card, about one item.
 
 # Rules
 - Warm, plain, and brief. No filler, no exclamation marks.
-- Never invent facts about their business; use only what's recorded below.
-- If they ask for something Ploy doesn't do, say so honestly and name the closest thing it does.
-- Never say a tool is connected or that Ploy has access to one. Naming a tool only tells Ploy what they use; they connect it themselves, and approve the access, from a task that needs it.
-
-# Where the trail stands
-${ready.text}
-
-${describeItems(state, docs, ready.done)}
-
-# Their first deliverable (quick win)
-${describeQuickWin(state)}
-
-# Their site
-${describeSite(state)}
-
-# The trail so far
-${trailSoFar(messages) || "(nothing yet)"}
-
-# What's recorded
-${describeEntry(state.workspace.entry)}
-
-${docs
-  .filter((d) => d.kind === "profile")
-  .map((d) => d.content_md)
-  .join("\n\n")}
-
-# What Ploy can do
-${catalogForPrompt()}`;
+- Never invent facts about their business; use only what's known above and what they said.
+- If they ask for something Ploy doesn't do (hiring, fundraising, legal, and so on), say plainly that Ploy doesn't do it, in one sentence, and name the closest thing it does for their customers or marketing. Never suggest Ploy helps with it indirectly (no "we can help attract investors" or "candidates").
+- That request is not their goal, and never who to reach: who to reach is always their customers.
+- Never say a tool is connected or that Ploy has access to one.`;
 }

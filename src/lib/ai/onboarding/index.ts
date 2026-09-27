@@ -1,7 +1,7 @@
 import { createUIMessageStream, Output, streamText } from "ai";
 import { quickWins } from "@/lib/catalog/quick-wins";
 import { logEvent } from "@/lib/db/events";
-import type { Workspace } from "@/lib/db/types";
+import type { Ploy, Workspace } from "@/lib/db/types";
 import { getDocs, getIntegrations, getMapNodes, getPloys, getWorkspace } from "@/lib/db/workspaces";
 import { syncMap } from "@/lib/map/sync";
 import { runQuickWin } from "@/lib/quick-wins/run";
@@ -18,15 +18,18 @@ import {
   upcomingQuickWin,
   type TrailState,
 } from "@/lib/onboarding/trail";
-import { readAndProfileSite } from "@/lib/site/run";
+import { readAndProfileSite, siteSettled } from "@/lib/site/run";
 import { models } from "../models";
 import type { OnboardingUIMessage } from "./messages";
 import { recordProfileNotes } from "./profile-notes";
-import { buildTrailPrompt } from "./prompt";
-import { turnSchema, writeMessage, type Turn } from "./reply";
+import { askableItems, buildTrailPrompt, hasReply } from "./prompt";
+import { turnSchemaFor, writeMessage, type Turn } from "./reply";
 
 /** Past this the planner is abandoned and code puts up the card (p95 is ~3s). PLANNER_TIMEOUT_MS overrides it. */
 const plannerTimeoutMs = () => Number(process.env.PLANNER_TIMEOUT_MS ?? 8000);
+
+/** How long the card after the website waits for their site to be read (usually 15-20s). SITE_WAIT_MS overrides it. */
+const siteWaitMs = () => Number(process.env.SITE_WAIT_MS ?? 20000);
 
 export type { OnboardingUIMessage } from "./messages";
 
@@ -89,33 +92,23 @@ export async function onboardingTurn({
         })
       : null;
 
-  // Read what the answer changed.
-  const [workspace, docs, ploys, mapNodes, integrations] = await loadState(workspaceId);
-  const answered = new Set(answeredSlots(messages));
-  if (answer?.slot) answered.add(answer.slot);
+  // Their site: start reading it now if it's new, and plan the next card from
+  // it rather than a guess (the wait is below, inside the stream).
+  const afterAnswer = await getWorkspace(workspaceId);
+  const siteRead = sideEffects ? readSiteIfNew(afterAnswer, messages) : null;
+  const siteUrl = afterAnswer.entry.website.status === "has" ? afterAnswer.entry.website.url : null;
+  const siteDone = afterAnswer.crawl?.url === siteUrl && (afterAnswer.crawl?.status === "done" || afterAnswer.crawl?.status === "failed");
+  const waitForSite = sideEffects && !!siteUrl && !siteDone;
 
-  // The first deliverable: the quick win they picked, or ours once we know enough.
-  // A quick win they picked starts unless one is already running, or (from a
-  // stale card) it isn't ready: only ready ones are offered.
-  const running = ploys.some((p) => p.spec?.source === "quick_win");
-  const picked = !running && answer?.quickWin && quickWinReady(answer.quickWin, { workspace, docs }) ? answer.quickWin : null;
-  const recipe = picked || quickWinToStart({ workspace, docs, ploys, answered });
-  // One that fails to start is skipped this turn; the next turn tries again.
-  const started = recipe
-    ? await startQuickWin(workspace, recipe, { picked: !!picked }).catch(async (error) => {
-        console.error("Failed to start a quick win", error);
-        await logEvent(workspaceId, "turn_error", { stage: "quick_win", recipe, error: String(error).slice(0, 200) });
-        return null;
-      })
-    : null;
-  const state: TrailState = { workspace, docs, ploys: started ? [...ploys, started] : ploys, mapNodes, integrations, answered };
-  const next = nextQuestion(state);
-
+  // Work that outlives the turn. The first deliverable is only known once the
+  // stream has decided it, so its run hangs off a promise the stream always settles.
+  let settleTurn: (started: Ploy | null) => void = () => {};
+  const turnDone = new Promise<Ploy | null>((resolve) => (settleTurn = resolve));
   const background = Promise.all([
     sideEffects && syncMap(workspaceId),
-    sideEffects && readSiteIfNew(workspace, messages),
+    siteRead,
     latest && recordProfileNotes(workspaceId, messages),
-    started && runQuickWin(workspaceId, started.id),
+    turnDone.then((started) => started && runQuickWin(workspaceId, started.id)),
   ]);
 
   const said = latest && {
@@ -124,61 +117,91 @@ export async function onboardingTurn({
     offScript: answer?.offScript ?? null,
     problems: answer?.problems ?? [],
   };
-  // The model plans every card but the website; around that card and at the cap it only replies, when there's something to reply to.
-  const planning = next === "plan";
-  const needsReply = !!said && (!said.answered || !!said.offScript);
 
   const stream = createUIMessageStream<OnboardingUIMessage>({
     originalMessages: messages,
     execute: async ({ writer }) => {
-      writer.write({ type: "start" });
-      if (answer?.slot && answer.summary)
-        writer.write({ type: "data-answered", data: { slot: answer.slot, summary: answer.summary } });
-      if (started) writer.write({ type: "data-taskStarted", data: { ployId: started.id, title: started.title } });
+      let started: Ploy | null = null;
+      try {
+        writer.write({ type: "start" });
+        // Their answer lands right away; the next card may wait on their site.
+        if (answer?.slot && answer.summary)
+          writer.write({ type: "data-answered", data: { slot: answer.slot, summary: answer.summary } });
+        if (waitForSite && siteUrl) await siteSettled(workspaceId, siteUrl, siteWaitMs()).catch(() => false);
 
-      let turn: Turn | null = null;
-      let plannerFailed = false;
-      if (planning || needsReply) {
-        try {
-          turn = await writeMessage(
-            writer,
-            streamText({
-              model: models.planner,
-              system: buildTrailPrompt({ state, docs, messages, said, planning }),
-              messages: [{ role: "user", content: latest ? `The user's latest message: "${latestText(latest)}"` : "Begin." }],
-              providerOptions: models.plannerOptions,
-              output: Output.object({ schema: turnSchema }),
-              abortSignal: AbortSignal.timeout(plannerTimeoutMs()),
-            }),
-          );
-        } catch (error) {
-          // The planner failed or ran past its time: code puts up the card instead.
-          plannerFailed = true;
-          console.error("Planner failed", error);
-          await logEvent(workspaceId, "turn_error", { stage: "planner", error: String(error).slice(0, 200) });
+        // Read what the answer (and their site) changed.
+        const [workspace, docs, ploys, mapNodes, integrations] = await loadState(workspaceId);
+        const answered = new Set(answeredSlots(messages));
+        if (answer?.slot) answered.add(answer.slot);
+
+        // The first deliverable: the quick win they picked, or ours once we know enough.
+        // A quick win they picked starts unless one is already running, or (from a
+        // stale card) it isn't ready: only ready ones are offered.
+        const running = ploys.some((p) => p.spec?.source === "quick_win");
+        const picked = !running && answer?.quickWin && quickWinReady(answer.quickWin, { workspace, docs }) ? answer.quickWin : null;
+        const recipe = picked || quickWinToStart({ workspace, docs, ploys, answered });
+        // One that fails to start is skipped this turn; the next turn tries again.
+        started = recipe
+          ? await startQuickWin(workspace, recipe, { picked: !!picked }).catch(async (error) => {
+              console.error("Failed to start a quick win", error);
+              await logEvent(workspaceId, "turn_error", { stage: "quick_win", recipe, error: String(error).slice(0, 200) });
+              return null;
+            })
+          : null;
+        if (started) writer.write({ type: "data-taskStarted", data: { ployId: started.id, title: started.title } });
+        const state: TrailState = { workspace, docs, ploys: started ? [...ploys, started] : ploys, mapNodes, integrations, answered };
+        const next = nextQuestion(state);
+
+        // The model plans every card but the website; around that card and at the cap it only replies, when there's something to reply to.
+        const planning = next === "plan";
+        const reply = hasReply(said);
+        let turn: Turn | null = null;
+        let plannerFailed = false;
+        if (planning || reply) {
+          try {
+            turn = await writeMessage(
+              writer,
+              streamText({
+                model: models.planner,
+                system: buildTrailPrompt({ state, docs, messages, said, planning }),
+                messages: [{ role: "user", content: latest ? `The user's latest message: "${latestText(latest)}"` : "Begin." }],
+                providerOptions: models.plannerOptions,
+                output: Output.object({ schema: turnSchemaFor(askableItems(state, messages)) }),
+                abortSignal: AbortSignal.timeout(plannerTimeoutMs()),
+              }),
+              { reply },
+            );
+          } catch (error) {
+            // The planner failed or ran past its time: code puts up the card instead.
+            plannerFailed = true;
+            console.error("Planner failed", error);
+            await logEvent(workspaceId, "turn_error", { stage: "planner", error: String(error).slice(0, 200) });
+          }
         }
-      }
 
-      // Without the planner: the same card again if this answer didn't land, else the next open item.
-      const fallback = plannerFailed ? (asked && !answer?.slot ? asked : fallbackCard(state)) : null;
-      if (plannerFailed && said && !said.answered) {
-        writer.write({ type: "text-start", id: "fallback" });
-        writer.write({ type: "text-delta", id: "fallback", delta: "Sorry, that didn't go through. Could you answer again?" });
-        writer.write({ type: "text-end", id: "fallback" });
+        // Without the planner: the same card again if this answer didn't land, else the next open item.
+        const fallback = plannerFailed ? (asked && !answer?.slot ? asked : fallbackCard(state)) : null;
+        if (plannerFailed && said && !said.answered) {
+          writer.write({ type: "text-start", id: "fallback" });
+          writer.write({ type: "text-delta", id: "fallback", delta: "Sorry, that didn't go through. Could you answer again?" });
+          writer.write({ type: "text-end", id: "fallback" });
+        }
+        const question = plannerFailed ? (planning ? fallback : next) : planning ? toQuestion(turn?.next ?? null, state) : next;
+        // A card code couldn't serve (e.g. a second quick win) finishes the trail instead; count how often.
+        if (planning && turn?.next && !question) {
+          console.warn(`Planner card dropped: ${turn.next.item}`);
+          await logEvent(workspaceId, "planner_card_dropped", { item: turn.next.item });
+        }
+        if (question) {
+          // Say up front when this answer will start their first deliverable.
+          const upcoming = upcomingQuickWin(question.slot, state);
+          const unlocks = upcoming ? quickWins[upcoming].builds : null;
+          writer.write({ type: "data-question", data: { ...question, unlocks, offScript: !!said?.offScript } });
+        }
+        writer.write({ type: "finish" });
+      } finally {
+        settleTurn(started);
       }
-      const question = plannerFailed ? (planning ? fallback : next) : planning ? toQuestion(turn?.next ?? null, state) : next;
-      // A card code couldn't serve (e.g. a second quick win) finishes the trail instead; count how often.
-      if (planning && turn?.next && !question) {
-        console.warn(`Planner card dropped: ${turn.next.item}`);
-        await logEvent(workspaceId, "planner_card_dropped", { item: turn.next.item });
-      }
-      if (question) {
-        // Say up front when this answer will start their first deliverable.
-        const upcoming = upcomingQuickWin(question.slot, state);
-        const unlocks = upcoming ? quickWins[upcoming].builds : null;
-        writer.write({ type: "data-question", data: { ...question, unlocks, offScript: !!said?.offScript } });
-      }
-      writer.write({ type: "finish" });
     },
     onEnd: async ({ messages }) => {
       await onSaved(messages);

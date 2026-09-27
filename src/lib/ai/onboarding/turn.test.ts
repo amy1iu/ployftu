@@ -55,7 +55,10 @@ vi.mock("@/lib/ai/onboarding/extract", () => ({
   extractEntryUpdate: vi.fn(async () => (fake.extract ? fake.extract() : { website: null, goals: null, business: null, answer: null })),
 }));
 vi.mock("@/lib/map/sync", () => ({ syncMap: vi.fn(async () => {}) }));
-vi.mock("@/lib/site/run", () => ({ readAndProfileSite: vi.fn(async () => {}) }));
+vi.mock("@/lib/site/run", () => ({
+  readAndProfileSite: vi.fn(async () => {}),
+  siteSettled: vi.fn(async () => true),
+}));
 vi.mock("@/lib/quick-wins/run", () => ({ runQuickWin: vi.fn(async () => {}) }));
 vi.mock("./profile-notes", () => ({ recordProfileNotes: vi.fn(async () => {}) }));
 
@@ -117,6 +120,12 @@ const tap = (slot: string, label: string, value: string): OnboardingUIMessage =>
   parts: [{ type: "text", text: label }],
 });
 const typed = (text: string): OnboardingUIMessage => ({ id: "typed", role: "user", parts: [{ type: "text", text }] });
+/** The website card, answered: an earlier answer on the trail. */
+const siteAnswered: OnboardingUIMessage[] = [
+  card({ slot: "website", question: "What's your website?" }),
+  { id: "site", role: "user", metadata: { slot: "website" }, parts: [{ type: "text", text: "acme.com" }] },
+  { id: "site-reply", role: "assistant", parts: [{ type: "data-answered", data: { slot: "website", summary: "acme.com" } }] },
+];
 
 const goalCard = card({
   slot: "goal_detail",
@@ -127,8 +136,8 @@ const goalCard = card({
   ],
 });
 
-async function run(messages: OnboardingUIMessage[]) {
-  const { stream } = await onboardingTurn({ workspaceId: "w1", messages, onSaved: async () => {}, sideEffects: false });
+async function run(messages: OnboardingUIMessage[], { sideEffects = false } = {}) {
+  const { stream } = await onboardingTurn({ workspaceId: "w1", messages, onSaved: async () => {}, sideEffects });
   const chunks: UIMessageChunk[] = [];
   const reader = stream.getReader();
   for (;;) {
@@ -192,6 +201,8 @@ describe("onboarding turn, when things fail", () => {
     };
     const { model, calls } = plannerReturning({
       message: "That didn't save on our side.",
+      understood: "A business with a website.",
+      gap: "goal_detail: what they want to grow",
       next: { item: "goal_detail", question: "What do you most want to grow?", hint: null, chips: [], alt: null },
     });
     fake.planner = model;
@@ -239,10 +250,10 @@ describe("onboarding turn, when things fail", () => {
   it("goes on without the quick win when it fails to start", async () => {
     fake.workspace.entry.goals = { status: "has", intents: [{ id: "get_more_leads", weight: 1 }], inUserWords: null, unmatched: null };
     vi.mocked(createPloy).mockRejectedValueOnce(new Error("database unavailable"));
-    const { model } = plannerReturning({ message: "", next: null });
+    const { model } = plannerReturning({ message: "", understood: "A business.", gap: "none", next: null });
     fake.planner = model;
     const customers = card({ slot: "target_customer", question: "Who are your best customers today?", chips: [{ label: "Not sure yet", value: "unsure" }] });
-    const turn = await run([customers, tap("target_customer", "Not sure yet", "unsure")]);
+    const turn = await run([...siteAnswered, customers, tap("target_customer", "Not sure yet", "unsure")]);
     expect(turn.errors).toEqual([]);
     expect(turn.chunks.some((c) => c.type === "data-taskStarted")).toBe(false);
     expect(vi.mocked(logEvent).mock.calls.some(([, name, props]) => name === "turn_error" && props?.stage === "quick_win")).toBe(true);
@@ -256,7 +267,7 @@ describe("onboarding turn, when things fail", () => {
       business: null,
       answer: { answered: true, matchedChip: "Freelancers", summary: "Local restaurants", offScript: null },
     });
-    const { model } = plannerReturning({ message: "", next: null });
+    const { model } = plannerReturning({ message: "", understood: "A business.", gap: "none", next: null });
     fake.planner = model;
     const customers = card({
       slot: "target_customer",
@@ -273,9 +284,84 @@ describe("onboarding turn, when things fail", () => {
     expect(vi.mocked(patchProfileSections).mock.calls[0][1]).toEqual([expect.objectContaining({ key: "who-we-serve", body: "Local restaurants" })]);
   });
 
+  it("waits for their site before planning the next card, and plans from it", async () => {
+    const { siteSettled } = await import("@/lib/site/run");
+    vi.mocked(siteSettled).mockImplementationOnce(async () => {
+      fake.workspace.crawl = {
+        url: "https://acme.com",
+        status: "done",
+        summary: { oneLiner: "Acme sells roasted coffee to independent cafés." },
+        opportunities: [],
+      } as unknown as Workspace["crawl"];
+      return true;
+    });
+    fake.workspace.entry.website = { status: "unknown", url: null };
+    const { model, calls } = plannerReturning({
+      message: "",
+      understood: "Acme sells roasted coffee to cafés.",
+      gap: "goal_detail: what they want to grow",
+      next: { item: "goal_detail", question: "What do you most want to grow?", hint: null, chips: [], alt: null },
+    });
+    fake.planner = model;
+    const website = card({ slot: "website", question: "What's your website?" });
+    const turn = await run([website, typed("acme.com")], { sideEffects: true });
+    expect(vi.mocked(siteSettled)).toHaveBeenCalledWith("w1", "https://acme.com", expect.any(Number));
+    // Their answer lands first; the card comes after the wait, planned from the site.
+    const answeredAt = turn.chunks.findIndex((c) => c.type === "data-answered");
+    const questionAt = turn.chunks.findIndex((c) => c.type === "data-question");
+    expect(answeredAt).toBeGreaterThanOrEqual(0);
+    expect(answeredAt).toBeLessThan(questionAt);
+    expect(JSON.stringify(calls[0].prompt)).toContain("Acme sells roasted coffee to independent cafés.");
+    expect(turn.question?.slot).toBe("goal_detail");
+  });
+
+  it("plans anyway when their site takes too long", async () => {
+    const { siteSettled } = await import("@/lib/site/run");
+    vi.mocked(siteSettled).mockResolvedValueOnce(false);
+    fake.workspace.entry.website = { status: "unknown", url: null };
+    const { model, calls } = plannerReturning({
+      message: "",
+      understood: "A business with a site.",
+      gap: "business_model: what they sell",
+      next: { item: "goal_detail", question: "What do you most want to grow?", hint: null, chips: [], alt: null },
+    });
+    fake.planner = model;
+    const turn = await run([card({ slot: "website", question: "What's your website?" }), typed("acme.com")], { sideEffects: true });
+    expect(turn.errors).toEqual([]);
+    expect(turn.question?.slot).toBe("goal_detail");
+    expect(JSON.stringify(calls[0].prompt)).toContain("Not read yet.");
+  });
+
+  it("holds the first deliverable when the first answer covers everything, and says the next card starts it", async () => {
+    fake.extract = async () => ({
+      website: { status: "has", url: "https://cultureamp.com", evidence: "cultureamp.com" },
+      goals: { status: "has", intents: [{ id: "run_outbound", weight: 1 }], inUserWords: "start cold outreach to HR leaders", unmatched: null, evidence: "cold outreach to HR leaders" },
+      business: { whatTheyDo: "Employee survey software", whoTheyServe: "Mid-size companies", evidence: "employee survey software to mid-size companies" },
+      answer: { answered: true, matchedChip: null, summary: "cultureamp.com", offScript: null },
+    });
+    // Everything the outreach sequence needs is known (who they reach, confirmed in their words).
+    const { confirmedProfile } = await import("@/test/fixtures");
+    fake.docs = confirmedProfile("offering", "audience");
+    fake.workspace.entry.website = { status: "unknown", url: null };
+    const { model, calls } = plannerReturning({
+      message: "Nice to meet you.",
+      understood: "Culture Amp sells employee survey software; outreach to HR leaders at mid-size companies.",
+      gap: "current_acquisition: how they reach HR leaders today",
+      next: { item: "current_acquisition", question: "How do you reach HR leaders today?", hint: null, chips: ["Conferences", "LinkedIn"], alt: null },
+    });
+    fake.planner = model;
+    const website = card({ slot: "website", question: "What's your website?" });
+    const turn = await run([website, typed("cultureamp.com. We sell employee survey software to mid-size companies. I want to start cold outreach to HR leaders.")]);
+    expect(turn.chunks.some((c) => c.type === "data-taskStarted")).toBe(false);
+    expect(turn.question).toMatchObject({ slot: "current_acquisition", unlocks: "a 3-step outreach sequence" });
+    // Nothing to reply to: a message the model writes anyway is dropped.
+    expect(turn.text).toBe("");
+    expect(JSON.stringify(calls[0].prompt)).toContain("Don't finish on their first answer");
+  });
+
   it("reads a conversation saved by an earlier version", async () => {
     fake.workspace.entry.goals = { status: "has", intents: [{ id: "get_more_leads", weight: 1 }], inUserWords: null, unmatched: null };
-    const { model } = plannerReturning({ message: "", next: null });
+    const { model } = plannerReturning({ message: "", understood: "A business.", gap: "none", next: null });
     fake.planner = model;
     // The old trail's follow-up card, answered with a chip.
     const old = card({

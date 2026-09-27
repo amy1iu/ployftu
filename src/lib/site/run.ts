@@ -114,6 +114,19 @@ export async function readAndProfileSite({
   await branding;
 }
 
+/**
+ * Waits until their site at `url` has been read and its profile drafted (or
+ * reading failed), up to `timeoutMs`. True when it settled in time. The read
+ * itself carries on either way (the logo and brand come in after).
+ */
+export async function siteSettled(workspaceId: string, url: string, timeoutMs: number) {
+  for (const started = Date.now(); ; await new Promise((r) => setTimeout(r, 750))) {
+    const { crawl } = await getWorkspace(workspaceId);
+    if (crawl?.url === url && (crawl.status === "done" || crawl.status === "failed")) return true;
+    if (Date.now() - started >= timeoutMs) return false;
+  }
+}
+
 /** "Looks right": the website-drafted profile becomes confirmed. */
 export async function confirmSiteProfile(workspaceId: string) {
   const [workspace, docs] = await Promise.all([getWorkspace(workspaceId), getDocs(workspaceId)]);

@@ -1,13 +1,14 @@
 import type { DeepPartial, UIMessageStreamWriter } from "ai";
 import { z } from "zod";
-import { contextItemIds } from "@/lib/catalog/context";
+import { contextItemIds, type ContextItemId } from "@/lib/catalog/context";
 import type { OnboardingUIMessage } from "./messages";
 import { sentenceFilter } from "./sentences";
 
-// One planner turn, in one structured call: what to say, then the next card
-// (which item to ask about, and its words) or null to finish. The message
-// streams into the chat first; the card goes up once it's complete. Nullable,
-// not optional: the repo's schemas stay OpenAI strict-mode compatible.
+// One planner turn, in one structured call: what to say, what it understood
+// and the biggest gap (written before choosing, so the choice follows from
+// them), then the next card or null to finish. The message streams into the
+// chat first; the card goes up once it's complete. Nullable, not optional: the
+// repo's schemas stay OpenAI strict-mode compatible.
 const card = {
   question: z.string().describe("One plain-text sentence, 15 words or fewer, ending in '?'"),
   hint: z.string().nullable().describe("One short line under the question: what answering unlocks. Null if nothing useful."),
@@ -18,10 +19,18 @@ const card = {
     ),
 };
 
-export const turnSchema = z.object({
+const turnFields = {
   message: z
     .string()
     .describe("What you say before the card: statements only, no question marks. Markdown allowed. Usually empty."),
+  understood: z.string().describe("One sentence: what this business sells, who it wants to reach, and what it wants to grow, as far as you know"),
+  gap: z
+    .string()
+    .describe('The one missing or too-broad thing that would most change their first deliverable or map, naming the item; "none" if nothing would'),
+};
+
+export const turnSchema = z.object({
+  ...turnFields,
   next: z
     .object({
       item: z.enum(contextItemIds).describe("The registry item this card asks about"),
@@ -35,32 +44,50 @@ export const turnSchema = z.object({
     .describe("The next card, or null to finish the trail"),
 });
 
+/** The turn's schema, offering only the items the next card may ask about (settled ones can't be picked). */
+export const turnSchemaFor = (items: readonly ContextItemId[]) =>
+  z.object({
+    ...turnFields,
+    next: items.length
+      ? z
+          .object({
+            item: z.enum(items as [ContextItemId, ...ContextItemId[]]).describe("The registry item this card asks about"),
+            ...card,
+            alt: z.object(card).nullable().describe("A quick-win card offered alongside (chips from the quick win options), or null"),
+          })
+          .nullable()
+          .describe("The next card, or null to finish the trail")
+      : z.null().describe("Nothing is left to ask: null"),
+  });
+
 export type Turn = z.infer<typeof turnSchema>;
 
 const TEXT_ID = "reply";
 
 /**
  * Streams the turn's message into the chat a sentence at a time (stray
- * questions dropped), and returns the whole turn for the card.
+ * questions dropped), and returns the whole turn for the card. When the turn
+ * has nothing to reply to, any message the model writes anyway is dropped.
  */
 export async function writeMessage(
   writer: UIMessageStreamWriter<OnboardingUIMessage>,
   result: { partialOutputStream: AsyncIterable<DeepPartial<Turn>>; output: PromiseLike<Turn> },
+  { reply = true }: { reply?: boolean } = {},
 ) {
   const message = sentenceFilter();
   let open = false;
   let done = false;
   const write = (delta: string) => {
-    if (!delta) return;
+    if (!delta || !reply) return;
     if (!open) writer.write({ type: "text-start", id: TEXT_ID });
     open = true;
     writer.write({ type: "text-delta", id: TEXT_ID, delta });
   };
   try {
     for await (const partial of result.partialOutputStream) {
-      // Fields arrive in order: once the card starts (or is null), the message is final.
+      // Fields arrive in order: once the next field starts, the message is final.
       if (done) continue;
-      if (partial.next === undefined) write(message.push(partial.message ?? ""));
+      if (partial.understood === undefined && partial.next === undefined) write(message.push(partial.message ?? ""));
       else {
         write(message.push(partial.message ?? "", true));
         done = true;

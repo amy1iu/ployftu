@@ -3,15 +3,17 @@ import { quickWins, type QuickWinId } from "@/lib/catalog/quick-wins";
 import { logEvent } from "@/lib/db/events";
 import type { Doc, Ploy, Workspace } from "@/lib/db/types";
 import { defaultQuickWin, entryBranch, topIntent, type Entry } from "@/lib/onboarding/entry";
-import { quickWinChips, quickWinReady, type AnsweredSlot } from "@/lib/onboarding/trail";
+import { MIN_ANSWERS_BEFORE_WIN, quickWinChips, quickWinReady, type AnsweredSlot } from "@/lib/onboarding/trail";
 import { createTaskPloy } from "@/lib/tasks/ploy";
 
 /**
  * On the goal path, the first deliverable starts once the goal is set and it
  * has what it needs to be specific to them (e.g. who they sell to). If they
  * were asked who they want to reach and weren't sure, one that doesn't need it
- * starts instead. Never one built on nothing. (On the quick-win path they pick
- * one of the ready ones themselves.) Returns the recipe to start this turn, or null.
+ * starts instead. Never one built on nothing, and never on their very first
+ * answer: even one that covers everything gets one more card first, which says
+ * what its answer starts (see upcomingQuickWin). (On the quick-win path they
+ * pick one of the ready ones themselves.) Returns the recipe to start this turn, or null.
  */
 export function quickWinToStart({
   workspace,
@@ -25,6 +27,7 @@ export function quickWinToStart({
   answered: ReadonlySet<AnsweredSlot>;
 }): QuickWinId | null {
   if (ploys.some((p) => p.spec?.source === "quick_win")) return null;
+  if (answered.size < MIN_ANSWERS_BEFORE_WIN) return null;
   const recipe = defaultQuickWin(workspace.entry);
   if (!recipe) return null;
   const state = { workspace, docs };

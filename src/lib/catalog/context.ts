@@ -94,7 +94,11 @@ export const contextItems: Record<ContextItemId, ContextItem> = {
     label: "Goal",
     why: "What they most want to grow in the next few months. Decides which tasks fill their map and their first deliverable.",
     sections: [{ doc: "goals-and-focus", section: "goals" }],
-    known: ({ workspace }) => workspace.entry.goals.status !== "unknown",
+    // Only asking for something Ploy doesn't do (e.g. hiring) isn't a goal it can act on: ask again.
+    known: ({ workspace }) => {
+      const { goals } = workspace.entry;
+      return goals.status === "unsure" || (goals.status === "has" && goals.intents.length > 0);
+    },
     inferred: never,
   },
   quick_win_offer: {

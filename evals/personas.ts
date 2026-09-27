@@ -28,6 +28,12 @@ export const personas: Persona[] = [
     expect: { branch: "A", website: "has", goals: "has", intents: ["get_more_leads", "convert_site_visitors"], domain: "brightsmile-dental.com" },
   },
   {
+    id: "a_frontload_outreach",
+    script:
+      "You run Pulsecheck, employee survey software for mid-size companies. Site: pulsecheck-hr.com. In your very first message, give your site, what you sell and to whom, and that you want to start cold outreach to HR leaders. After that, answer follow-ups briefly and specifically.",
+    expect: { branch: "A", website: "has", goals: "has", intents: ["run_outbound", "get_more_leads"], domain: "pulsecheck-hr.com" },
+  },
+  {
     id: "a_terse",
     script:
       "You run Tidewater Kayaks, guided kayak tours. Site: tidewaterkayaks.com. Goal: more people who visit the site should book a tour. You're terse: a few words per message, no pleasantries.",
@@ -131,6 +137,12 @@ export const personas: Persona[] = [
     id: "c_no_site_customers",
     script:
       "You run a mobile dog grooming business. You have no website. You want more customers. Answer one thing at a time.",
+    expect: { branch: "C", website: "none", goals: "has", intents: ["get_more_leads"] },
+  },
+  {
+    id: "c_frontload_nosite",
+    script:
+      "You run Suds on Wheels, a mobile dog grooming van in Austin for busy pet owners. You have no website. In your very first message, say you have no site, what you do and for whom, and that you want more bookings. After that, answer follow-ups briefly.",
     expect: { branch: "C", website: "none", goals: "has", intents: ["get_more_leads"] },
   },
   {
