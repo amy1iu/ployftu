@@ -10,15 +10,12 @@ import { applyAnswer, type AppliedAnswer } from "@/lib/onboarding/answer";
 import { upgradeTrail } from "@/lib/onboarding/legacy";
 import {
   answeredSlots,
-  canRedo,
   fallbackCard,
   nextQuestion,
   openQuestion,
-  questionFor,
   quickWinReady,
   toQuestion,
   upcomingQuickWin,
-  type TrailMetadata,
   type TrailState,
 } from "@/lib/onboarding/trail";
 import { readAndProfileSite } from "@/lib/site/run";
@@ -76,9 +73,8 @@ export async function onboardingTurn({
   // Conversations saved by an earlier version name their cards differently.
   const messages = upgradeTrail(saved);
   const latest = messages.at(-1)?.role === "user" ? messages.at(-1)! : null;
-  // Usually the card on screen; or, when they change an earlier answer, the question that asked for it.
-  const meta = (latest?.metadata ?? {}) as TrailMetadata;
-  const asked = meta.redo && meta.slot && canRedo(meta.slot) ? questionFor(messages, meta.slot) : openQuestion(messages);
+  // The card on screen, which their message answers.
+  const asked = openQuestion(messages);
   const userTurns = messages.filter((m) => m.role === "user").length;
 
   const before = await getWorkspace(workspaceId);

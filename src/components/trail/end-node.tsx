@@ -62,6 +62,8 @@ export function EndNode({ disabled, onAsk }: { disabled: boolean; onAsk: (text: 
           {finishing ? "Finishing…" : "Finish onboarding"}
         </button>
       )}
+      {/* Answers on the trail can't be changed; what they tell Ploy here updates their profile Docs (profile notes). */}
+      <p className="leading-snug text-muted">Something about your business wrong or changed? Tell Ploy here and it&apos;ll update your profile.</p>
       <form
         onSubmit={(e) => {
           e.preventDefault();

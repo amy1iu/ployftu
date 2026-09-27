@@ -7,7 +7,6 @@ import { legacyAnchors } from "@/lib/map/plan";
 import { nodeState, type NodeState } from "@/lib/map/state";
 import {
   openQuestion,
-  questionFor,
   type AnsweredData,
   type AnsweredSlot,
   type QuestionData,
@@ -57,12 +56,9 @@ export function buildRows(
   { hasRead, quickWin, busy }: { hasRead: boolean; quickWin: Ploy | undefined; busy: boolean },
 ): Row[] {
   const rows: Row[] = [{ kind: "home", key: null }];
-  // Each slot's row, so a changed answer updates in place.
+  // Each slot's row: conversations from earlier versions, where answers could be changed, update it in place.
   const answeredAt = new Map<AnsweredSlot, number>();
   const open = openQuestion(messages);
-  const last = messages.at(-1);
-  // Changing an earlier answer leaves the card on screen where it is.
-  const redoing = last?.role === "user" && !!metaOf(last).redo;
   let asked: QuestionData | null = null;
 
   messages.forEach((message, i) => {
@@ -73,9 +69,7 @@ export function buildRows(
       // Waiting on the reply: show the answer as pending.
       const meta = metaOf(message);
       const slot = meta.slot ?? asked?.slot;
-      const existing = meta.redo && slot ? answeredAt.get(slot) : undefined;
-      if (existing !== undefined) rows[existing] = { ...(rows[existing] as Extract<Row, { kind: "answered" }>), summary: textOf(message), pending: true };
-      else if (asked && slot)
+      if (asked && slot)
         rows.push({ kind: "answered", key: `pending-${message.id}`, slot, summary: textOf(message), pending: true, asked: cardFor(asked, slot), said: null });
       else rows.push({ kind: "reply", key: null, id: message.id, said: textOf(message), text: null });
       return;
@@ -85,14 +79,13 @@ export function buildRows(
     if (answered) {
       const from = messages[i - 1];
       const meta = metaOf(from);
-      const question = meta.redo ? questionFor(messages.slice(0, i), answered.slot) : asked;
       const existing = answeredAt.get(answered.slot);
       const row: Row = {
         kind: "answered",
         key: answered.slot === "website" ? (hasRead ? "website" : "site") : answered.slot,
         slot: answered.slot,
         summary: answered.summary,
-        asked: cardFor(question, answered.slot),
+        asked: cardFor(asked, answered.slot),
         said: from?.role === "user" && meta.value === undefined ? textOf(from) : null,
       };
       if (existing !== undefined) rows[existing] = row;
@@ -107,7 +100,7 @@ export function buildRows(
 
     const question = partOf<QuestionData>(message, "data-question");
     const text = textOf(message);
-    const isOpen = !!question && question === open && (i === messages.length - 1 || redoing);
+    const isOpen = !!question && question === open && i === messages.length - 1;
     // A greeting, or a note about their answer, leads into the question; a reply to something off-script stands alone.
     const lead = text && isOpen && (i === 0 || !question.offScript) ? text : null;
     // The greeting only introduces the first question.
@@ -121,8 +114,8 @@ export function buildRows(
 
   // From the moment they answer until the next card (or the wrap-up) arrives:
   // whenever a turn is in flight and no card is on screen.
-  if (busy && !redoing && !rows.some((r) => r.kind === "question")) rows.push({ kind: "thinking", key: null });
-  if ((!busy || redoing) && !open) rows.push({ kind: "end", key: "end" });
+  if (busy && !rows.some((r) => r.kind === "question")) rows.push({ kind: "thinking", key: null });
+  if (!busy && !open) rows.push({ kind: "end", key: "end" });
   return rows;
 }
 

@@ -77,15 +77,12 @@ export function Trail({
   messages,
   busy,
   onAnswer,
-  onRedo,
   onAsk,
   footer,
 }: {
   messages: OnboardingUIMessage[];
   busy: boolean;
   onAnswer: (answer: Answer) => void;
-  /** Change an earlier answer. */
-  onRedo: (answer: Answer) => void;
   onAsk: (text: string) => void;
   /** Shown at the end of the trail (e.g. an error with a retry). */
   footer?: ReactNode;
@@ -187,9 +184,7 @@ export function Trail({
                       said={row.said}
                       tasks={left.length + right.length}
                       pending={row.pending}
-                      disabled={busy}
                       onHover={(on) => setHovered(on ? row.key : null)}
-                      onRedo={onRedo}
                     />
                   </TrailRow>
                 );

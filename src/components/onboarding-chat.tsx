@@ -42,7 +42,6 @@ export function OnboardingChat() {
         messages={shown}
         busy={busy}
         onAnswer={({ text, slot, value }) => send({ text, metadata: { slot, value } })}
-        onRedo={({ text, slot, value }) => send({ text, metadata: { slot, value, redo: true } })}
         onAsk={(text) => send({ text })}
         footer={
           failed && (

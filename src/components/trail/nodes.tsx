@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { contextItems } from "@/lib/catalog/context";
 import type { Ploy } from "@/lib/db/types";
-import { canRedo, essence, type AnsweredSlot, type Chip, type QuestionData } from "@/lib/onboarding/trail";
+import { essence, type AnsweredSlot, type Chip, type QuestionData } from "@/lib/onboarding/trail";
 import type { SiteCrawl } from "@/lib/site/types";
 import { Markdown } from "../markdown";
 
@@ -24,7 +24,6 @@ export function QuestionCard({
   lead,
   disabled,
   onAnswer,
-  onCancel,
   unlocks,
   width = "w-[300px]",
 }: {
@@ -36,8 +35,6 @@ export function QuestionCard({
   lead?: string | null;
   disabled: boolean;
   onAnswer: (answer: Answer) => void;
-  /** When changing an earlier answer: keep the old one. */
-  onCancel?: () => void;
   width?: string;
 }) {
   const [draft, setDraft] = useState("");
@@ -55,11 +52,6 @@ export function QuestionCard({
       <div className="mb-1.5 flex items-center gap-1.5 text-[12px] text-muted">
         <span className="flex size-[18px] items-center justify-center rounded-full bg-ink text-[10px] font-semibold text-white">P</span>
         Ploy
-        {onCancel && (
-          <button type="button" onClick={onCancel} className="ml-auto underline hover:text-ink">
-            Keep my answer
-          </button>
-        )}
       </div>
       {lead && <p className="mb-1.5 text-[13px] leading-snug text-muted">{lead}</p>}
       <p className="text-[14.5px] leading-snug font-medium text-ink">{card.question}</p>
@@ -96,7 +88,6 @@ export function QuestionCard({
       >
         <input
           value={draft}
-          autoFocus={!!onCancel}
           disabled={disabled}
           onChange={(e) => {
             setDraft(e.currentTarget.value);
@@ -166,9 +157,7 @@ export function AnsweredNode({
   said,
   tasks,
   pending,
-  disabled,
   onHover,
-  onRedo,
 }: {
   slot: AnsweredSlot;
   summary: string;
@@ -178,28 +167,10 @@ export function AnsweredNode({
   said: string | null;
   tasks: number;
   pending?: boolean;
-  disabled: boolean;
   onHover?: (hovering: boolean) => void;
-  onRedo: (answer: Answer) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
   const question = asked && essence(asked.question);
-
-  if (editing && asked)
-    return (
-      <QuestionCard
-        card={asked}
-        slot={slot}
-        disabled={disabled}
-        onCancel={() => setEditing(false)}
-        onAnswer={(answer) => {
-          setEditing(false);
-          setOpen(false);
-          onRedo(answer);
-        }}
-      />
-    );
 
   const expanded = open && !pending;
   return (
@@ -245,21 +216,10 @@ export function AnsweredNode({
           )}
         </span>
       </button>
-      {expanded && (
-        <div className="flex items-center gap-3 px-3.5 pb-2.5 text-[12px]">
-          {tasks > 0 && (
-            <span className="text-subtle">
-              Put {tasks} task{tasks === 1 ? "" : "s"} on your map
-            </span>
-          )}
-          {asked && canRedo(slot) ? (
-            <button type="button" disabled={disabled} onClick={() => setEditing(true)} className="ml-auto text-ink underline disabled:opacity-50">
-              Change answer
-            </button>
-          ) : (
-            slot === "quick_win_offer" && <span className="ml-auto text-subtle">Already underway</span>
-          )}
-        </div>
+      {expanded && tasks > 0 && (
+        <p className="px-3.5 pb-2.5 text-[12px] text-subtle">
+          Put {tasks} task{tasks === 1 ? "" : "s"} on your map
+        </p>
       )}
     </div>
   );

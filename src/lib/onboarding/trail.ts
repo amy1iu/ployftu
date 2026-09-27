@@ -46,10 +46,8 @@ export type QuestionData = Card & {
 export type AnsweredData = { slot: AnsweredSlot; summary: string };
 
 /** A user message's metadata: which card it answers, the chip's value if they tapped one, and whether it changes an earlier answer. */
-export type TrailMetadata = { slot?: AnsweredSlot; value?: string; redo?: boolean };
+export type TrailMetadata = { slot?: AnsweredSlot; value?: string };
 
-/** Answers that can be changed later. A quick win, once started, can't. */
-export const canRedo = (slot: AnsweredSlot) => slot !== "quick_win_offer";
 
 /** The trail ends after this many answers (the website included), whatever the model plans. */
 export const MAX_ANSWERED = 6;
@@ -322,15 +320,6 @@ export function withoutFailedTurn<M extends UIMessage>(messages: M[]): M[] {
 type Parts = UIMessage["parts"];
 const dataOf = <T,>(parts: Parts, type: string) =>
   parts.filter((p) => p.type === type).map((p) => (p as { data: T }).data);
-
-/** The latest question that asked for a slot (the fork asks for two). */
-export function questionFor(messages: UIMessage[], slot: AnsweredSlot): QuestionData | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const [question] = dataOf<QuestionData>(messages[i].parts, "data-question");
-    if (question && (question.slot === slot || question.alt?.slot === slot)) return question;
-  }
-  return null;
-}
 
 /** Every slot answered so far on the trail. */
 export const answeredSlots = (messages: UIMessage[]) =>
